@@ -6,11 +6,10 @@
 #include <unordered_map>
 #include <set>
 #include <algorithm>
-#include <vector>
 
 #include "stb_image.h"
 #include <glad/glad.h>
-#include <GLFW/glfw3.h>
+#include <glfw/glfw3.h>
 
 namespace GLClasses
 {

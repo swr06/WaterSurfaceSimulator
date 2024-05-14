@@ -3,7 +3,6 @@
 #include <fstream>
 
 #include <iostream>
-#include <vector>
 
 namespace GLClasses
 {
@@ -69,7 +68,7 @@ namespace GLClasses
 			}
 
 			// Force 4 bytes per pixel 
-			unsigned char* image = stbi_load(path.c_str(), &m_width, &m_height, &m_BPP, 4);
+			m_Image = stbi_load(path.c_str(), &m_width, &m_height, &m_BPP, 4);
 			m_BPP = 4;
 
 			if (m_BPP == 1)
@@ -90,7 +89,7 @@ namespace GLClasses
 				_internalformat = hdr ? GL_SRGB_ALPHA : GL_RGBA;
 			}
 
-			if (image)
+			if (m_Image)
 			{
 				_TextureCacheEntry data =
 				{
@@ -105,7 +104,7 @@ namespace GLClasses
 
 				LastID += 1;
 
-				glTexImage2D(type, 0, _internalformat, m_width, m_height, 0, internalformat, GL_UNSIGNED_BYTE, image);
+				glTexImage2D(type, 0, _internalformat, m_width, m_height, 0, internalformat, GL_UNSIGNED_BYTE, m_Image);
 				
 				if (mipmap)
 				{
@@ -114,7 +113,7 @@ namespace GLClasses
 
 				if (clean_up)
 				{
-					stbi_image_free(image);
+					stbi_image_free(m_Image);
 				}
 
 				// texture handle generate mado

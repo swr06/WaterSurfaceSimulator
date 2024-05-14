@@ -40,7 +40,6 @@ namespace GLClasses
 			char error[256];
 			char* ccode = stb_include_file((char*)path.c_str(), (char*)"", (char*)"Core/Shaders/", error);
 			m_ShaderContents = ccode;
-			free(ccode);
 
 		}
 
@@ -354,7 +353,7 @@ namespace GLClasses
 			if (loc == -1)
 			{
 				std::stringstream s;
-				//std::cout << "\nERROR! : UNIFORM NOT FOUND IN COMPUTE SHADER !    |    UNIFORM : " << uniform_name << "  \n\n";
+				std::cout << "\nERROR! : UNIFORM NOT FOUND IN COMPUTE SHADER !    |    UNIFORM : " << uniform_name << "  \n\n";
 				s << "\nERROR! : UNIFORM NOT FOUND IN COMPUTE SHADER !    |    UNIFORM : " << uniform_name << "  \n\n";
 
 				Simulation::Logger::LogToFile(s.str());

@@ -126,6 +126,8 @@ namespace GLClasses
 
 		int m_delete_texture;
 
+		unsigned char* m_Image;
+
 	private:
 
 		bool m_clean_up;

@@ -265,9 +265,6 @@
     <None Include="Core\Shaders\FBOVert.glsl">
       <Filter>Source Files\Simulation\Shaders</Filter>
     </None>
-    <None Include="Core\Shaders\Simulate.glsl">
-      <Filter>Source Files\Simulation\Shaders</Filter>
-    </None>
     <None Include="Core\Shaders\RenderFragment.glsl">
       <Filter>Source Files\Simulation\Shaders</Filter>
     </None>

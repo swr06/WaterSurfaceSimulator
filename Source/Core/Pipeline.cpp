@@ -88,6 +88,12 @@ namespace Simulation {
 				Simulation::ShaderManager::ForceRecompileShaders();
 			}
 
+			if (e.type == Simulation::EventTypes::KeyPress && e.key == GLFW_KEY_V && this->GetCurrentFrame() > 5)
+			{
+				vsync = !vsync;
+			}
+
+
 
 		}
 
@@ -104,6 +110,11 @@ namespace Simulation {
 		// Create VBO and VAO for drawing the screen-sized quad.
 		GLClasses::VertexBuffer ScreenQuadVBO;
 		GLClasses::VertexArray ScreenQuadVAO;
+
+		GLClasses::Texture Heightmap;
+		Heightmap.CreateTexture("Res/Heightmap.png", false, false, false, GL_TEXTURE_2D,
+			GL_LINEAR, GL_LINEAR,
+			GL_REPEAT, GL_REPEAT, false);
 
 		// Setup screensized quad for rendering
 		{
@@ -128,17 +139,9 @@ namespace Simulation {
 
 		// Shaders
 		GLClasses::Shader& BlitShader = ShaderManager::GetShader("BLIT");
-		GLClasses::Shader& RenderShader = ShaderManager::GetShader("RENDER");
-		GLClasses::ComputeShader& SimulateShader = ShaderManager::GetComputeShader("SIMULATE");
-
-		// Matrices
 		float OrthographicRange = 400.0f;
 		OrthographicCamera Orthographic(-400.0f, 400.0f, -400.0f, 400.0f);
-
-		// Create Random Objects 
-		Random RNG;
-
-		// Clear simulation map
+		
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 
@@ -148,33 +151,13 @@ namespace Simulation {
 			glDisable(GL_CULL_FACE);
 
 			app.OnUpdate();
-
-			if (app.GetCurrentFrame() > 16) {
-				// Simulate 
-				SimulateShader.Use();
-				SimulateShader.SetFloat("u_Dt", DeltaTime);
-				SimulateShader.SetFloat("u_Time", glfwGetTime());
-				SimulateShader.SetInteger("u_ObjectCount", ObjectCount);
-
-				glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ObjectSSBO);
-				glDispatchCompute((ObjectCount / 16) + 2, 1, 1);
-			}
-
-			// Blit Final Result 
 			glBindFramebuffer(GL_FRAMEBUFFER,0);
 			glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 			glClear(GL_COLOR_BUFFER_BIT);
 
-			RenderShader.Use();
-
-			RenderShader.SetMatrix4("u_Projection", Orthographic.GetProjectionMatrix());
-			RenderShader.SetVector2f("u_Dimensions", glm::vec2(app.GetWidth(), app.GetHeight()));
-			RenderShader.SetVector2f("u_Dims", glm::vec2(app.GetWidth(), app.GetHeight()));
-
-			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, ObjectSSBO);
-
+			BlitShader.Use();
 			ScreenQuadVAO.Bind();
-			glDrawArraysInstanced(GL_TRIANGLES, 0, 6, ObjectCount);
+			glDrawArrays(GL_TRIANGLES, 0, 6);
 			ScreenQuadVAO.Unbind();
 
 			glUseProgram(0);
