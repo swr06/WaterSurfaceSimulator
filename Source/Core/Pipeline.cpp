@@ -4,11 +4,17 @@
 
 #include "Object.h"
 
+#include "FpsCamera.h"
+#include "Player.h"
+
 namespace Simulation {
 
 	float CurrentTime = glfwGetTime();
 	float Frametime = 0.0f;
 	float DeltaTime = 0.0f;
+
+	Player MainPlayer;
+	FPSCamera& Camera = MainPlayer.Camera;
 
 	std::vector<Object> Objects;
 
@@ -58,15 +64,20 @@ namespace Simulation {
 
 			if (e.type == Simulation::EventTypes::MouseMove && GetCursorLocked())
 			{
+				Camera.UpdateOnMouseMovement(e.mx, e.my);
 			}
 
 
 			if (e.type == Simulation::EventTypes::MouseScroll && !ImGui::GetIO().WantCaptureMouse)
 			{
+				float Sign = e.msy < 0.0f ? 1.0f : -1.0f;
+				Camera.SetFov(Camera.GetFov() + 2.0f * Sign);
+				Camera.SetFov(glm::clamp(Camera.GetFov(), 1.0f, 89.0f));
 			}
 
 			if (e.type == Simulation::EventTypes::WindowResize)
 			{
+				Camera.SetAspect((float)glm::max(e.wx, 1) / (float)glm::max(e.wy, 1));
 			}
 
 			if (e.type == Simulation::EventTypes::KeyPress && e.key == GLFW_KEY_ESCAPE) {
@@ -139,8 +150,6 @@ namespace Simulation {
 
 		// Shaders
 		GLClasses::Shader& BlitShader = ShaderManager::GetShader("BLIT");
-		float OrthographicRange = 400.0f;
-		OrthographicCamera Orthographic(-400.0f, 400.0f, -400.0f, 400.0f);
 		
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
@@ -151,11 +160,16 @@ namespace Simulation {
 			glDisable(GL_CULL_FACE);
 
 			app.OnUpdate();
+
+			// Player
+			MainPlayer.OnUpdate(app.GetWindow(), DeltaTime, 0.4f, app.GetCurrentFrame());
+
 			glBindFramebuffer(GL_FRAMEBUFFER,0);
 			glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 			glClear(GL_COLOR_BUFFER_BIT);
 
 			BlitShader.Use();
+
 			ScreenQuadVAO.Bind();
 			glDrawArrays(GL_TRIANGLES, 0, 6);
 			ScreenQuadVAO.Unbind();
