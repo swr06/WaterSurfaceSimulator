@@ -29,6 +29,82 @@ namespace GLClasses
 		GLchar GLInfoLog[512];
 
 		GLuint gs = 0;
+		GLuint tcs = 0;
+		GLuint tes = 0;
+
+		if (m_TCSData.size() > 0)
+		{
+			tcs = glCreateShader(GL_TESS_CONTROL_SHADER);
+
+			const char* tcssrc = m_TCSData.c_str();
+
+			glShaderSource(tcs, 1, &tcssrc, 0);
+			glCompileShader(tcs);
+			glGetShaderiv(tcs, GL_COMPILE_STATUS, &successful);
+
+			if (!successful)
+			{
+				std::stringstream s;
+				glGetShaderInfoLog(tcs, 512, NULL, GLInfoLog);
+				std::cout << "\nCOMPILATION ERROR IN TESSELATION CONTROL SHADER (" << m_TCSPath << ")" << "\n" << GLInfoLog << "\n\n";
+				s << "\nCOMPILATION ERROR IN GEOMETRY SHADER (" << m_TCSPath << ")" << "\n" << GLInfoLog << "\n\n";
+
+				Simulation::Logger::LogToFile(s.str());
+			}
+
+			GLint log_length = 0;
+
+			glGetShaderiv(tcs, GL_INFO_LOG_LENGTH, &log_length);
+
+			if (log_length > 0)
+			{
+				std::stringstream s;
+
+				std::string shaderlog(log_length, 0);
+				glGetShaderInfoLog(tcs, log_length, 0, shaderlog.data());
+				std::cout << "TCS Shader compilation log: " << shaderlog << std::endl;
+				s << "TCS Shader compilation log: " << shaderlog << std::endl;
+
+				Simulation::Logger::LogToFile(s.str());
+			}
+		}
+
+		if (m_TESData.size() > 0)
+		{
+			tes = glCreateShader(GL_TESS_EVALUATION_SHADER);
+
+			const char* tessrc = m_TESData.c_str();
+
+			glShaderSource(tes, 1, &tessrc, 0);
+			glCompileShader(tes);
+			glGetShaderiv(tes, GL_COMPILE_STATUS, &successful);
+
+			if (!successful)
+			{
+				std::stringstream s;
+				glGetShaderInfoLog(tes, 512, NULL, GLInfoLog);
+				std::cout << "\nCOMPILATION ERROR IN TES SHADER (" << m_TESPath << ")" << "\n" << GLInfoLog << "\n\n";
+				s << "\nCOMPILATION ERROR IN TES SHADER (" << m_TESPath << ")" << "\n" << GLInfoLog << "\n\n";
+
+				Simulation::Logger::LogToFile(s.str());
+			}
+
+			GLint log_length = 0;
+
+			glGetShaderiv(tes, GL_INFO_LOG_LENGTH, &log_length);
+
+			if (log_length > 0)
+			{
+				std::stringstream s;
+
+				std::string shaderlog(log_length, 0);
+				glGetShaderInfoLog(tes, log_length, 0, shaderlog.data());
+				std::cout << "TES Shader compilation log: " << shaderlog << std::endl;
+				s << "TES Shader compilation log: " << shaderlog << std::endl;
+
+				Simulation::Logger::LogToFile(s.str());
+			}
+		}
 
 		if (m_GeometryData.size() > 0)
 		{
@@ -136,12 +212,23 @@ namespace GLClasses
 
 		m_Program = glCreateProgram();
 		glAttachShader(m_Program, vs);
-		glAttachShader(m_Program, fs);
 
 		if (m_GeometryData.size() > 0)
 		{
 			glAttachShader(m_Program, gs);
 		}
+
+		if (m_TCSData.size() > 0)
+		{
+			glAttachShader(m_Program, tcs);
+		}
+
+		if (m_TESData.size() > 0)
+		{
+			glAttachShader(m_Program, tes);
+		}
+
+		glAttachShader(m_Program, fs);
 
 		glLinkProgram(m_Program);
 
@@ -226,6 +313,106 @@ namespace GLClasses
 		m_GeometryCRC = CRC::Calculate(m_GeometryData.c_str(), m_GeometryData.size(), CRC::CRC_32());
 	}
 
+	void Shader::CreateShaderProgramFromFileTess(const std::string& vertex_pth, const std::string& fragment_pth, const std::string& TCS, const std::string& TES, const std::string& geometry_path)
+	{
+		if (geometry_path.size() > 0)
+		{
+			std::ifstream geo_file;
+			std::stringstream g_cont;
+
+			geo_file.exceptions(std::ifstream::badbit | std::ifstream::failbit);
+			geo_file.open(geometry_path, std::ios::in);
+
+			if (geo_file.good() && geo_file.is_open())
+			{
+				g_cont << geo_file.rdbuf();
+				m_GeometryPath = geometry_path;
+				m_GeometryData = g_cont.str();
+			}
+
+			geo_file.close();
+		}
+
+		if (TCS.size() > 0)
+		{
+			std::ifstream tcsfile;
+			std::stringstream tcscont;
+
+			tcsfile.exceptions(std::ifstream::badbit | std::ifstream::failbit);
+			tcsfile.open(TCS, std::ios::in);
+
+			if (tcsfile.good() && tcsfile.is_open())
+			{
+				tcscont << tcsfile.rdbuf();
+				m_TCSPath = TCS;
+				m_TCSData = tcscont.str();
+			}
+
+			tcsfile.close();
+		}
+
+		if (TES.size() > 0)
+		{
+			std::ifstream tesfile;
+			std::stringstream tescont;
+
+			tesfile.exceptions(std::ifstream::badbit | std::ifstream::failbit);
+			tesfile.open(TES, std::ios::in);
+
+			if (tesfile.good() && tesfile.is_open())
+			{
+				tescont << tesfile.rdbuf();
+				m_TESPath = TES;
+				m_TESData = tescont.str();
+			}
+
+			tesfile.close();
+		}
+
+		std::stringstream v_cont;
+		std::stringstream f_cont;
+		std::ifstream vertex_file;
+		std::ifstream frag_file;
+
+		vertex_file.exceptions(std::ifstream::badbit | std::ifstream::failbit);
+		frag_file.exceptions(std::ifstream::badbit | std::ifstream::failbit);
+
+		vertex_file.open(vertex_pth, std::ios::in);
+		frag_file.open(fragment_pth, std::ios::in);
+
+		m_VertexPath = vertex_pth;
+		m_FragmentPath = fragment_pth;
+
+		if (vertex_file.good() && frag_file.good())
+		{
+			v_cont << vertex_file.rdbuf();
+			f_cont << frag_file.rdbuf();
+			vertex_file.close();
+			frag_file.close();
+
+			char error[256];
+			char* vcode = stb_include_file((char*)vertex_pth.c_str(), (char*)"", (char*)"Core/Shaders/", error);
+			m_VertexData = vcode;
+
+			char* fcode = stb_include_file((char*)fragment_pth.c_str(), (char*)"", (char*)"Core/Shaders/", error);
+			m_FragmentData = fcode;
+		}
+
+		// Create hashes 
+
+		m_VertexSize = m_VertexData.size();
+		m_FragmentSize = m_FragmentData.size();
+		m_GeometrySize = m_GeometryData.size();
+		m_TCSSize = m_TCSData.size();
+		m_TESSize = m_TESData.size();
+
+		m_VertexCRC = CRC::Calculate(m_VertexData.c_str(), m_VertexData.size(), CRC::CRC_32());
+		m_FragmentCRC = CRC::Calculate(m_FragmentData.c_str(), m_FragmentData.size(), CRC::CRC_32());
+		m_GeometryCRC = CRC::Calculate(m_GeometryData.c_str(), m_GeometryData.size(), CRC::CRC_32());
+		m_TCSCRC = CRC::Calculate(m_TCSData.c_str(), m_TCSData.size(), CRC::CRC_32());
+		m_TESCRC = CRC::Calculate(m_TESData.c_str(), m_TESData.size(), CRC::CRC_32());
+	}
+
 	void Shader::Destroy()
 	{
 		_BVHTextureFlag = false;
@@ -236,7 +423,7 @@ namespace GLClasses
 
 	void Shader::ValidateProgram()
 	{
-		GLchar GLInfoLog[512] = {'\0'};
+		GLchar GLInfoLog[512] = { '\0' };
 		GLint successful = false;
 
 		glValidateProgram(m_Program);
@@ -268,15 +455,23 @@ namespace GLClasses
 		uint32_t PrevFHash = m_FragmentCRC;
 		uint32_t PrevGHash = m_GeometryCRC;
 
+		uint32_t PrevTESHash = m_TESCRC;
+		uint32_t PrevTCSHash = m_TCSCRC;
+
 		uint32_t PrevVSize = m_VertexSize;
 		uint32_t PrevFSize = m_FragmentSize;
 		uint32_t PrevGSize = m_GeometrySize;
+
+		uint32_t PrevTCSSize = m_TCSSize;
+		uint32_t PrevTESSize = m_TESSize;
 
 		CreateShaderProgramFromFile(m_VertexPath, m_FragmentPath, m_GeometryPath);
 
 		if (PrevVHash != m_VertexCRC || PrevFHash != m_FragmentCRC ||
 			PrevGHash != m_GeometryCRC || PrevVSize != m_VertexSize ||
-			PrevFSize != m_FragmentSize || PrevGSize != m_GeometrySize) {
+			PrevFSize != m_FragmentSize || PrevGSize != m_GeometrySize || 
+			PrevTESHash != m_TESCRC || PrevTCSHash != m_TCSCRC || 
+			PrevTESSize != m_TESSize || PrevTCSSize != m_TCSSize) {
 			
 			_BVHTextureFlag = false;
 

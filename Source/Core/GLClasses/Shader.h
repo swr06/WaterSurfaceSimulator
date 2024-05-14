@@ -45,6 +45,7 @@ namespace GLClasses
 
 		void CompileShaders();
 		void CreateShaderProgramFromFile(const std::string& vertex_pth, const std::string& fragment_pth, const std::string& geometry_path = "");
+		void CreateShaderProgramFromFileTess(const std::string& vertex_pth, const std::string& fragment_pth, const std::string& TCS, const std::string& TES, const std::string& geometry_path = "");
 		inline GLuint GetProgramID() const { return m_Program; };
 		
 		inline void Use() 
@@ -90,11 +91,23 @@ namespace GLClasses
 		std::string m_GeometryData = "";
 		std::string m_GeometryPath = "";
 
+		std::string m_TCSData = "";
+		std::string m_TCSPath = "";
+
+		std::string m_TESData = "";
+		std::string m_TESPath = "";
+
 		uint32_t m_VertexCRC = 0;
 		uint32_t m_FragmentCRC = 0;
 		uint32_t m_GeometryCRC = 0;
 		uint32_t m_VertexSize = 0;
 		uint32_t m_FragmentSize = 0;
 		uint32_t m_GeometrySize = 0;
+
+
+		uint32_t m_TESSize = 0;
+		uint32_t m_TCSSize = 0;		
+		uint32_t m_TESCRC = 0;
+		uint32_t m_TCSCRC = 0;
 	};
 }
