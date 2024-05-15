@@ -270,6 +270,16 @@ namespace Simulation
 		OnImguiRender(this->GetTime());
 
 		VoxelRT_mouse_enabled = !GetCursorLocked();
+
+		if (GetCursorLocked())
+		{
+			glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+		}
+
+		else
+		{
+			glfwSetInputMode(m_Window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+		}
 	}
 
 	void Application::FinishFrame()

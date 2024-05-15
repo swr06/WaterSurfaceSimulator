@@ -48,7 +48,9 @@ namespace Simulation {
 			ImGuiIO& io = ImGui::GetIO();
 			if (ImGui::Begin("Debug/Edit Mode")) {
 
-
+				ImGui::Text("Camera Position : %f,  %f,  %f", Camera.GetPosition().x, Camera.GetPosition().y, Camera.GetPosition().z);
+				ImGui::Text("Camera Front : %f,  %f,  %f", Camera.GetFront().x, Camera.GetFront().y, Camera.GetFront().z);
+				ImGui::Text("Time : %f s", glfwGetTime());
 			
 			} ImGui::End();
 		}
@@ -150,6 +152,7 @@ namespace Simulation {
 
 		// Shaders
 		GLClasses::Shader& BlitShader = ShaderManager::GetShader("BLIT");
+		GLClasses::Shader& BasicRender = ShaderManager::GetShader("BASICRENDER");
 		
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
@@ -168,7 +171,8 @@ namespace Simulation {
 			glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 			glClear(GL_COLOR_BUFFER_BIT);
 
-			BlitShader.Use();
+			BasicRender.Use();
+			BasicRender.SetMatrix4("u_ViewProj", Camera.GetViewProjection());
 
 			ScreenQuadVAO.Bind();
 			glDrawArrays(GL_TRIANGLES, 0, 6);
