@@ -124,6 +124,10 @@ namespace Simulation {
 		GLClasses::VertexBuffer ScreenQuadVBO;
 		GLClasses::VertexArray ScreenQuadVAO;
 
+		GLClasses::VertexBuffer WaterMeshVBO;
+		GLClasses::IndexBuffer WaterMeshEBO;
+		GLClasses::VertexArray WaterMeshVAO;
+
 		GLClasses::Texture Heightmap;
 		Heightmap.CreateTexture("Res/Heightmap.png", false, false, false, GL_TEXTURE_2D,
 			GL_LINEAR, GL_LINEAR,
@@ -147,12 +151,64 @@ namespace Simulation {
 			ScreenQuadVAO.Unbind();
 		}
 
+		int Resolution = 128;
+
+		{
+			std::vector<float> BufferData;
+			std::vector<unsigned int> Indices;
+
+
+			float Range = 128.0f;
+
+			for (int x = -Resolution; x <= Resolution; x++) {
+
+				for (int y = -Resolution; y <= Resolution; y++) {
+
+					float Cx = (Range / (float)(Resolution)) * float(x);
+					float Cy = (Range / (float)(Resolution)) * float(y);
+
+					BufferData.push_back(Cx);
+					BufferData.push_back(Cy);
+				}
+			}
+
+			int Height = Resolution * 2;
+
+			for (int x = 0; x <= Height; x++) {
+				for (int y = 0; y < Height; y++) {
+					int i1 = (x * Height) + (Height + 2 + x + y) - 1;
+					int i2 = (x * Height) + y + x + 1 - 1;
+					int i3 = (x * Height) + y + x + 2 - 1;
+					int i4 = (x * Height) + y + x + 2 - 1;
+					int i5 = (x * Height) + (Height + 2 + y + x) + 1 - 1;
+					int i6 = i1;
+
+					Indices.push_back(i1);
+					Indices.push_back(i2);
+					Indices.push_back(i3);
+					Indices.push_back(i4);
+					Indices.push_back(i5);
+					Indices.push_back(i6);
+				}
+			}
+
+			WaterMeshVAO.Bind();
+			WaterMeshVBO.Bind();
+			WaterMeshEBO.Bind();
+			WaterMeshVBO.BufferData(BufferData.size() * sizeof(float), BufferData.data(), GL_STATIC_DRAW);
+			WaterMeshVBO.VertexAttribPointer(0, 2, GL_FLOAT, 0, 2 * sizeof(GLfloat), 0);
+			WaterMeshEBO.BufferData(Indices.size() * sizeof(unsigned int), Indices.data(), GL_STATIC_DRAW);
+			WaterMeshVAO.Unbind();
+		}
+
 		// Create Shaders 
 		ShaderManager::CreateShaders();
 
 		// Shaders
 		GLClasses::Shader& BlitShader = ShaderManager::GetShader("BLIT");
 		GLClasses::Shader& BasicRender = ShaderManager::GetShader("BASICRENDER");
+
+
 		
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
@@ -170,13 +226,16 @@ namespace Simulation {
 			glBindFramebuffer(GL_FRAMEBUFFER,0);
 			glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 			glClear(GL_COLOR_BUFFER_BIT);
+			glPolygonMode(GL_FRONT, GL_LINE);
+			glPolygonMode(GL_BACK, GL_LINE);
 
 			BasicRender.Use();
 			BasicRender.SetMatrix4("u_ViewProj", Camera.GetViewProjection());
+			BasicRender.SetMatrix4("u_ViewProjRot", Camera.GetViewProjection() * glm::rotate(glm::mat4(1.0f), 1.570f, glm::vec3(1.0f, 0.0f, 0.0f)));
 
-			ScreenQuadVAO.Bind();
-			glDrawArrays(GL_TRIANGLES, 0, 6);
-			ScreenQuadVAO.Unbind();
+			WaterMeshVAO.Bind();
+			glDrawElements(GL_TRIANGLES, Resolution * Resolution * 4 * 6, GL_UNSIGNED_INT, 0);
+			WaterMeshVAO.Unbind();
 
 			glUseProgram(0);
 
