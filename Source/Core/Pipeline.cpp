@@ -151,14 +151,14 @@ namespace Simulation {
 			ScreenQuadVAO.Unbind();
 		}
 
-		int Resolution = 128;
+		int Resolution = 256;
 
 		{
 			std::vector<float> BufferData;
 			std::vector<unsigned int> Indices;
 
 
-			float Range = 128.0f;
+			float Range = 8.0f;
 
 			for (int x = -Resolution; x <= Resolution; x++) {
 
