@@ -8,6 +8,7 @@ void Simulation::ShaderManager::CreateShaders()
 {
 	AddShader("BLIT", "Core/Shaders/FBOVert.glsl", "Core/Shaders/Blit.glsl");
 	AddShader("BASICRENDER", "Core/Shaders/RenderVertex.glsl", "Core/Shaders/RenderFragment.glsl");
+	AddShader("SPHERE", "Core/Shaders/FBOVert.glsl", "Core/Shaders/RenderSpheres.glsl");
 }
 
 void Simulation::ShaderManager::AddShader(const std::string& name, const std::string& vert, const std::string& frag, const std::string& geo)

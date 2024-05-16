@@ -7,11 +7,29 @@
 #include "FpsCamera.h"
 #include "Player.h"
 
+#define MAX_SPHERES 16
+
 namespace Simulation {
+
+	struct Sphere {
+		glm::vec3 Position;
+		glm::vec3 Velocity;
+		glm::vec3 Acceleration;
+		float Mass;
+		float Density;
+		float Radius;
+	};
+
+	struct RenderSphere {
+		glm::vec4 PositionRadius;
+	};
+
+	std::vector<Sphere> Spheres;
 
 	float CurrentTime = glfwGetTime();
 	float Frametime = 0.0f;
 	float DeltaTime = 0.0f;
+	bool WireFrame = false;
 
 	Player MainPlayer;
 	FPSCamera& Camera = MainPlayer.Camera;
@@ -45,12 +63,37 @@ namespace Simulation {
 
 		void OnImguiRender(double ts) override
 		{
+			static float r = 0.5f;
+
 			ImGuiIO& io = ImGui::GetIO();
 			if (ImGui::Begin("Debug/Edit Mode")) {
 
 				ImGui::Text("Camera Position : %f,  %f,  %f", Camera.GetPosition().x, Camera.GetPosition().y, Camera.GetPosition().z);
 				ImGui::Text("Camera Front : %f,  %f,  %f", Camera.GetFront().x, Camera.GetFront().y, Camera.GetFront().z);
 				ImGui::Text("Time : %f s", glfwGetTime());
+
+				ImGui::NewLine();
+
+				ImGui::Checkbox("Wireframe", &WireFrame);
+
+				ImGui::NewLine();
+				ImGui::NewLine();
+				
+				if (Spheres.size() < MAX_SPHERES) {
+					if (ImGui::Button("Place Sphere")) {
+						Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (r * 2.1f)), glm::vec3(0.0f), glm::vec3(0.0f), 1.0f, 1.0f, r };
+						Spheres.push_back(s1);
+					}
+
+					ImGui::SliderFloat("Radii of Sphere", &r, 0.05f, 2.0f);
+				}
+				ImGui::NewLine();
+
+				if (Spheres.size() > 0) {
+					if (ImGui::Button("Delete Sphere")) {
+						Spheres.pop_back();
+					}
+				}
 			
 			} ImGui::End();
 		}
@@ -135,7 +178,6 @@ namespace Simulation {
 
 		// Setup screensized quad for rendering
 		{
-			unsigned long long CurrentFrame = 0;
 			float QuadVertices_NDC[] =
 			{
 				-1.0f,  1.0f,  0.0f, 1.0f, -1.0f, -1.0f,  0.0f, 0.0f,
@@ -143,22 +185,24 @@ namespace Simulation {
 				 1.0f, -1.0f,  1.0f, 0.0f,  1.0f,  1.0f,  1.0f, 1.0f
 			};
 
-			ScreenQuadVAO.Bind();
 			ScreenQuadVBO.Bind();
 			ScreenQuadVBO.BufferData(sizeof(QuadVertices_NDC), QuadVertices_NDC, GL_STATIC_DRAW);
+			
+			ScreenQuadVAO.Bind();
+			ScreenQuadVBO.Bind();
 			ScreenQuadVBO.VertexAttribPointer(0, 2, GL_FLOAT, 0, 4 * sizeof(GLfloat), 0);
 			ScreenQuadVBO.VertexAttribPointer(1, 2, GL_FLOAT, 0, 4 * sizeof(GLfloat), (void*)(2 * sizeof(GLfloat)));
 			ScreenQuadVAO.Unbind();
 		}
 
-		int Resolution = 256;
+		int Resolution = 192;
 
 		{
 			std::vector<float> BufferData;
 			std::vector<unsigned int> Indices;
 
 
-			float Range = 8.0f;
+			float Range = 4.0f;
 
 			for (int x = -Resolution; x <= Resolution; x++) {
 
@@ -207,27 +251,59 @@ namespace Simulation {
 		// Shaders
 		GLClasses::Shader& BlitShader = ShaderManager::GetShader("BLIT");
 		GLClasses::Shader& BasicRender = ShaderManager::GetShader("BASICRENDER");
+		GLClasses::Shader& RTSphere = ShaderManager::GetShader("SPHERE");
 
-
+		GLClasses::Framebuffer GBuffer[2] = { GLClasses::Framebuffer(16, 16, {{GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, false, false}}, true, true), GLClasses::Framebuffer(16, 16, {{GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, false, false}}, true, true) };
 		
+		// Spheres
+		GLuint SphereSSBO = 0;
+		glGenBuffers(1, &SphereSSBO);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, SphereSSBO);
+		glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(RenderSphere) * MAX_SPHERES, (void*)0, GL_DYNAMIC_DRAW);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+		// Make Spheres
+
+		Sphere s1 = { glm::vec3(0.0f), glm::vec3(0.0f), glm::vec3(0.0f), 1.0f, 1.0f, 0.5f };
+		Spheres.push_back(s1);
+
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
 
 		while (!glfwWindowShouldClose(app.GetWindow())) {
 
-			glDisable(GL_DEPTH_TEST);
 			glDisable(GL_CULL_FACE);
 
 			app.OnUpdate();
 
-			// Player
-			MainPlayer.OnUpdate(app.GetWindow(), DeltaTime, 0.4f, app.GetCurrentFrame());
+			// FBO Update
+			GBuffer[0].SetSize(app.GetWidth(), app.GetHeight());
+			GBuffer[1].SetSize(app.GetWidth(), app.GetHeight());
 
-			glBindFramebuffer(GL_FRAMEBUFFER,0);
+			// Player
+			MainPlayer.OnUpdate(app.GetWindow(), DeltaTime, 0.5f, app.GetCurrentFrame());
+
+			// Upadate spheres
+			if (Spheres.size() > MAX_SPHERES) {
+				throw "yo.";
+			}
+
+			std::vector<RenderSphere> Data;
+			for (int i = 0; i < Spheres.size(); i++) {
+				Data.push_back({ glm::vec4(Spheres[i].Position, Spheres[i].Radius) });
+			}
+
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, SphereSSBO);
+			glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(RenderSphere) * Data.size(), Data.data(), GL_DYNAMIC_DRAW);
+
+			// GBuffer
+			GBuffer[0].Bind();
+			glEnable(GL_DEPTH_TEST);
 			glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
-			glClear(GL_COLOR_BUFFER_BIT);
-			glPolygonMode(GL_FRONT, GL_LINE);
-			glPolygonMode(GL_BACK, GL_LINE);
+
+			glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+			glPolygonMode(GL_FRONT, WireFrame ? GL_LINE : GL_FILL);
+			glPolygonMode(GL_BACK, WireFrame ? GL_LINE : GL_FILL);
 
 			BasicRender.Use();
 			BasicRender.SetMatrix4("u_ViewProj", Camera.GetViewProjection());
@@ -237,7 +313,55 @@ namespace Simulation {
 			glDrawElements(GL_TRIANGLES, Resolution * Resolution * 4 * 6, GL_UNSIGNED_INT, 0);
 			WaterMeshVAO.Unbind();
 
+			glDisable(GL_DEPTH_TEST);
+			glDisable(GL_CULL_FACE);
 			glUseProgram(0);
+			glPolygonMode(GL_FRONT, GL_FILL);
+			glPolygonMode(GL_BACK, GL_FILL);
+
+			// Sphere
+
+			GBuffer[1].Bind();
+			RTSphere.Use();
+			
+			RTSphere.SetInteger("u_Texture", 0);
+			RTSphere.SetInteger("u_Depth", 1);
+			RTSphere.SetInteger("u_Spheres", Spheres.size());
+			
+			RTSphere.SetFloat("u_zNear", Camera.GetNearPlane());
+			RTSphere.SetFloat("u_zFar", Camera.GetFarPlane());
+			RTSphere.SetMatrix4("u_InverseProjection", glm::inverse(Camera.GetProjectionMatrix()));
+			RTSphere.SetMatrix4("u_InverseView", glm::inverse(Camera.GetViewMatrix()));
+			
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, SphereSSBO);
+			
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, GBuffer[0].GetTexture());
+			
+			glActiveTexture(GL_TEXTURE1);
+			glBindTexture(GL_TEXTURE_2D, GBuffer[0].GetDepthBuffer());
+			
+			ScreenQuadVAO.Bind();
+			glDrawArrays(GL_TRIANGLES, 0, 6);
+			ScreenQuadVAO.Unbind();
+
+			// Blit
+
+			glBindFramebuffer(GL_FRAMEBUFFER, 0);
+
+			glPolygonMode(GL_FRONT, GL_FILL);
+			glPolygonMode(GL_BACK, GL_FILL);
+
+			BlitShader.Use();
+
+			BlitShader.SetInteger("u_Texture", 0);
+
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, GBuffer[1].GetTexture());
+
+			ScreenQuadVAO.Bind();
+			glDrawArrays(GL_TRIANGLES, 0, 6);
+			ScreenQuadVAO.Unbind();
 
 			glFinish();
 			app.FinishFrame();

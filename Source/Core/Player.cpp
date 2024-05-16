@@ -23,6 +23,11 @@ namespace Simulation
 
 		float camera_speed = speed;
 
+		if (glfwGetKey(window, GLFW_KEY_TAB) == GLFW_PRESS)
+		{
+			camera_speed *= 2.5;
+		}
+
 		if (glfwGetKey(window, GLFW_KEY_W) == GLFW_PRESS)
 		{
 			// Take the cross product of the camera's right and up.
@@ -50,6 +55,8 @@ namespace Simulation
 		{
 			m_Acceleration.y -= camera_speed * 1.35f;
 		}
+
+		
 
 		if (glfwGetKey(window, GLFW_KEY_SPACE) == GLFW_PRESS)
 		{
