@@ -23,11 +23,15 @@ namespace Simulation {
 	bool DoSim = false;
 	float DampingCoeff = 0.4f;
 
+	bool PhysicsStep = false;
+
 	float* Heightmap;
 	float* ObjectHeights;
 	float* WaterVelocities;
 	float* WaterAccelerations;
 	Random RandomGen;
+
+	typedef glm::vec3 Force;
 
 	int To1DIdx(int x, int y) {
 		return (y * Resolution) + x;
@@ -36,10 +40,11 @@ namespace Simulation {
 	struct Sphere {
 		glm::vec3 Position;
 		glm::vec3 Velocity;
-		glm::vec3 Acceleration;
 		float Mass;
 		float Density;
 		float Radius;
+		glm::vec3 NetAcceleration;
+		std::vector<Force> Forces;
 	};
 
 	struct RenderSphere {
@@ -96,6 +101,9 @@ namespace Simulation {
 
 				ImGui::NewLine();
 				ImGui::Checkbox("Do Sim", &DoSim);
+
+				PhysicsStep = ImGui::Button("Step Simulation");
+
 				ImGui::SliderInt("Substeps", &Substeps, 1, 100);
 				ImGui::SliderFloat("c", &c, 0.0f, 100.0f);
 				ImGui::SliderFloat("Damping Coeff", &DampingCoeff, 0.01f, 4.0f);
@@ -129,7 +137,7 @@ namespace Simulation {
 
 				if (Spheres.size() < MAX_SPHERES) {
 					if (ImGui::Button("Place Sphere")) {
-						Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (r * 2.1f)), glm::vec3(0.0f), glm::vec3(0.0f), 1.0f, 1.0f, r };
+						Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (r * 2.1f)), glm::vec3(0.0f), 1.0f, 1.0f, r, glm::vec3(0.0f), {} };
 						Spheres.push_back(s1);
 					}
 
@@ -292,6 +300,35 @@ namespace Simulation {
 
 	}
 
+	void SimulateObjects(float dt) {
+
+		const float g = 9.81;
+		const glm::vec3 jcap = glm::vec3(0.0f, 1.0f, 0.0f);
+
+		for (int i = 0; i < Spheres.size(); i++) {
+
+			Sphere& s = Spheres[i];
+
+			s.NetAcceleration = glm::vec3(0.0f);
+			s.Forces.push_back(s.Mass * g * -jcap);
+
+			for (auto& e : s.Forces) {
+				s.NetAcceleration += e / s.Mass;
+			}
+
+			s.Forces.clear();
+
+			s.Velocity += s.NetAcceleration * dt;
+
+			glm::vec3 PrevPosition = s.Position;
+
+			s.Position += s.Velocity * dt;
+			s.Velocity = (s.Position - PrevPosition) / dt;
+		}
+
+	}
+
+
 	void Pipeline::StartPipeline()
 	{
 		// Application
@@ -325,7 +362,7 @@ namespace Simulation {
 
 			ScreenQuadVBO.Bind();
 			ScreenQuadVBO.BufferData(sizeof(QuadVertices_NDC), QuadVertices_NDC, GL_STATIC_DRAW);
-			
+
 			ScreenQuadVAO.Bind();
 			ScreenQuadVBO.Bind();
 			ScreenQuadVBO.VertexAttribPointer(0, 2, GL_FLOAT, 0, 4 * sizeof(GLfloat), 0);
@@ -388,7 +425,7 @@ namespace Simulation {
 		GLClasses::Shader& RTSphere = ShaderManager::GetShader("SPHERE");
 
 		GLClasses::Framebuffer GBuffer[2] = { GLClasses::Framebuffer(16, 16, {{GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, false, false},  {GL_RGBA16F, GL_RGBA, GL_FLOAT, false, false}}, true, true), GLClasses::Framebuffer(16, 16, {{GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, false, false}, {GL_RGBA16F, GL_RGBA, GL_FLOAT, false, false}}, true, true) };
-		
+
 		// Spheres
 		GLuint SphereSSBO = 0;
 		glGenBuffers(1, &SphereSSBO);
@@ -401,10 +438,10 @@ namespace Simulation {
 		ObjectHeights = new float[Resolution * Resolution];
 		WaterVelocities = new float[Resolution * Resolution];
 		WaterAccelerations = new float[Resolution * Resolution];
-		memset(Heightmap, 0, Resolution* Resolution * sizeof(float));
-		memset(WaterAccelerations, 0, Resolution* Resolution * sizeof(float));
-		memset(WaterVelocities, 0, Resolution* Resolution * sizeof(float));
-		memset(ObjectHeights, 0, Resolution* Resolution * sizeof(float));
+		memset(Heightmap, 0, Resolution * Resolution * sizeof(float));
+		memset(WaterAccelerations, 0, Resolution * Resolution * sizeof(float));
+		memset(WaterVelocities, 0, Resolution * Resolution * sizeof(float));
+		memset(ObjectHeights, 0, Resolution * Resolution * sizeof(float));
 
 		// GPU Data
 		GLuint HeightmapSSBO = 0;
@@ -423,11 +460,14 @@ namespace Simulation {
 
 		// Make Spheres
 
-		Sphere s1 = { glm::vec3(0.0f), glm::vec3(0.0f), glm::vec3(0.0f), 1.0f, 1.0f, 0.5f };
+		Sphere s1 = { glm::vec3(0.0f), glm::vec3(0.0f), 1.0f, 1.0f, 0.5f, glm::vec3(0.0f), {}};
 		Spheres.push_back(s1);
 
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
+
+		SimulateObjects(0.00001f);
+		SimulateWater(0.00001f);
 
 		while (!glfwWindowShouldClose(app.GetWindow())) {
 
@@ -445,8 +485,12 @@ namespace Simulation {
 			MainPlayer.OnUpdate(app.GetWindow(), DeltaTime, 0.5f, app.GetCurrentFrame());
 
 			// SIMULATE
-			if (DoSim)
+			if (DoSim || PhysicsStep)
+			{
 				SimulateWater(DeltaTime);
+				SimulateObjects(DeltaTime);
+				PhysicsStep = false;
+			}
 
 			///
 
