@@ -11,16 +11,17 @@
 
 namespace Simulation {
 
-	int Resolution = 128;
+	int Resolution = 192;
 	float Range = 4.0f;
 	float Width = Range / Resolution;
 
-	int Substeps = 4;
+	int Substeps = 3;
 
 	float c = 10.0f;
 	float s = 1.0f;
 	float kProportionality = (c * c) / (s * s);
 	bool DoSim = false;
+	float DampingCoeff = 0.4f;
 
 	float* Heightmap;
 	float* ObjectHeights;
@@ -97,6 +98,7 @@ namespace Simulation {
 				ImGui::Checkbox("Do Sim", &DoSim);
 				ImGui::SliderInt("Substeps", &Substeps, 1, 100);
 				ImGui::SliderFloat("c", &c, 0.0f, 100.0f);
+				ImGui::SliderFloat("Damping Coeff", &DampingCoeff, 0.01f, 4.0f);
 				ImGui::SliderFloat("s", &s, 0.1f, 100.0f);
 
 				if (ImGui::Button("Mod")) {
@@ -257,6 +259,7 @@ namespace Simulation {
 				float Acceleration = WaterAccelerations[To1DIdx(x, y)];
 
 				WaterVelocities[To1DIdx(x, y)] += Acceleration * Dt;
+				WaterVelocities[To1DIdx(x, y)] *= glm::clamp(1.0f - (DampingCoeff * Dt), 0.0f, 1.0f);
 			}
 		}
 
