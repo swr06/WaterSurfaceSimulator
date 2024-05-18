@@ -11,14 +11,22 @@
 
 namespace Simulation {
 
+	// kg/m^3
+	const float RhoWater = 998.2f;
+	const float RhoRubber = 1522.0f;
+	const float RhoWood = 700.0f; // Cherrywood? or something.
+
 	float DebugVar = 0.0f;
 
-	int Resolution = 192;
+	int Resolution = 256;
 	float Range = 4.0f;
-	float Width = Range / Resolution;
+	float ColumnWidth = (2.0f * Range) / float(Resolution);
+
+	float AlphaO = 1.0f;
 
 	int Substeps = 3;
 
+	float CurrDens = RhoRubber;
 	float c = 10.0f;
 	float s = 1.0f;
 	float kProportionality = (c * c) / (s * s);
@@ -41,14 +49,24 @@ namespace Simulation {
 		return (y * Resolution) + x;
 	}
 
-	struct Sphere {
+	class Sphere {
+	public: 
 		glm::vec3 Position;
 		glm::vec3 Velocity;
-		float Mass;
 		float Density;
 		float Radius;
 		glm::vec3 NetAcceleration;
-		std::vector<Force> Forces;
+		glm::vec3 NetForce;
+
+		inline float Mass() const noexcept {
+			const float m = (4.0f / 3.0f) * 3.141592653;
+			return m * Radius * Radius * Radius * Density;
+		}
+
+		inline float Volume() const noexcept {
+			const float m = (4.0f / 3.0f) * 3.141592653;
+			return m * Radius * Radius * Radius;
+		}
 	};
 
 	struct RenderSphere {
@@ -147,7 +165,9 @@ namespace Simulation {
 				ImGui::SliderFloat("c", &c, 0.0f, 100.0f);
 				ImGui::SliderFloat("Damping Coeff", &DampingCoeff, 0.01f, 4.0f);
 				ImGui::SliderFloat("s", &s, 0.1f, 100.0f);
-
+				ImGui::SliderFloat("AlphaO", &AlphaO, 0.0f, 1.0f);
+				ImGui::SliderFloat("CurrDens", &CurrDens, 2.0f, 4000.0f);
+				
 				if (ImGui::Button("Mod")) {
 					Heightmap[int(RandomGen.Float() * Resolution * Resolution)] = 1.5;
 					Heightmap[int(RandomGen.Float() * Resolution * Resolution)] = 0.5f;
@@ -176,7 +196,7 @@ namespace Simulation {
 
 				if (Spheres.size() < MAX_SPHERES) {
 					if (ImGui::Button("Place Sphere")) {
-						Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (r * 2.1f)), glm::vec3(0.0f), 1.0f, 1.0f, r, glm::vec3(0.0f), {} };
+						Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (r * 2.1f)), glm::vec3(0.0f), CurrDens, r, glm::vec3(0.0f), {} };
 						Spheres.push_back(s1);
 					}
 
@@ -339,7 +359,7 @@ namespace Simulation {
 				float NetVolumeDisplaced = 0.0f;
 
 				for (int i = 0; i < Spheres.size(); i++) {
-					glm::vec3 rsi = RSI(glm::vec3(WorldSpace.x, 1.0f, WorldSpace.y) - Spheres[i].Position, glm::vec3(0.0f, -1.0f, 0.0f), Spheres[i].Radius);
+					glm::vec3 rsi = RSI(glm::vec3(WorldSpace.x, 0.0f, WorldSpace.y) - Spheres[i].Position, glm::vec3(0.0f, -1.0f, 0.0f), Spheres[i].Radius);
 					float h = rsi.z;
 
 					if (rsi.x < 0.0f && rsi.y < 0.0f) {
@@ -348,7 +368,10 @@ namespace Simulation {
 					else if (rsi.x > 0.0f && rsi.y > 0.0f) {
 						h = std::abs(rsi.x - rsi.y);
 					}
-					
+
+					float Volume = ColumnWidth * ColumnWidth * h;
+					float Fb = RhoWater * 9.81f * Volume;
+					Spheres[i].NetForce += (Fb * glm::vec3(0.0f, 1.0f, 0.0f));
 					NetVolumeDisplaced += h;
 				}
 
@@ -370,21 +393,6 @@ namespace Simulation {
 
 	}
 
-	void SimulateWater(float Dt) {
-
-
-
-		float Ddt = Dt / float(Substeps);
-
-		for (int i = 0; i < Substeps; i++) {
-
-			SimulateWaterAcceleration(Ddt);
-			SimulateWaterVelocities(Ddt);
-			SimulateWaterHeights(Ddt);
-		}
-
-	}
-
 	void SimulateObjects(float dt) {
 
 		const float g = 9.81;
@@ -394,21 +402,33 @@ namespace Simulation {
 
 			Sphere& s = Spheres[i];
 
-			s.NetAcceleration = glm::vec3(0.0f);
-			s.Forces.push_back(s.Mass * g * -jcap);
-
-			for (auto& e : s.Forces) {
-				s.NetAcceleration += e / s.Mass;
-			}
-
-			s.Forces.clear();
-
+			s.NetForce += (s.Mass() * g * -jcap);
+			s.NetAcceleration = s.NetForce / s.Mass();
+			
+			s.NetForce = glm::vec3(0.0f);
+			
 			s.Velocity += s.NetAcceleration * dt;
-
+			
 			glm::vec3 PrevPosition = s.Position;
-
+			
 			s.Position += s.Velocity * dt;
 			s.Velocity = (s.Position - PrevPosition) / dt;
+		}
+
+	}
+
+
+	void SimulateWater(float Dt) {
+
+		float Ddt = Dt / float(Substeps);
+
+		for (int i = 0; i < Substeps; i++) {
+
+			GenerateObjectMap(Ddt);
+			SimulateWaterAcceleration(Ddt);
+			SimulateWaterVelocities(Ddt);
+			SimulateWaterHeights(Ddt);
+			SimulateObjects(Ddt);
 		}
 
 	}
@@ -548,8 +568,8 @@ namespace Simulation {
 
 		// Make Spheres
 
-		Sphere s1 = { glm::vec3(0.0f), glm::vec3(0.0f), 1.0f, 1.0f, 0.5f, glm::vec3(0.0f), {} };
-		Spheres.push_back(s1);
+		Sphere s1 = { glm::vec3(0.0f), glm::vec3(0.0f), 1.0f, 0.5f, glm::vec3(0.0f), {} };
+		//Spheres.push_back(s1);
 
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
 		glClear(GL_COLOR_BUFFER_BIT);
@@ -577,13 +597,9 @@ namespace Simulation {
 			if (DoSim || PhysicsStep)
 			{
 				SimulateWater(DeltaTime);
-				SimulateObjects(DeltaTime);
 				PhysicsStep = false;
 			}
 
-			///!
-			GenerateObjectMap(DeltaTime);
-			///
 
 			// Upadate spheres
 			if (Spheres.size() > MAX_SPHERES) {
