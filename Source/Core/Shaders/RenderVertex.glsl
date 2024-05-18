@@ -56,6 +56,7 @@ float Bilinear(vec2 SampleUV)
 void main()
 {
 	gl_Position = u_ModelMatrix * vec4(a_Position, 1.0f, 1.0f);
+    gl_Position.y += 1.0f;
 	
     v_WorldPos = vec3(gl_Position.xyz);
 

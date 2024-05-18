@@ -18,15 +18,16 @@ namespace Simulation {
 
 	float DebugVar = 0.0f;
 
-	int Resolution = 256;
+	int Resolution = 192;
 	float Range = 4.0f;
 	float ColumnWidth = (2.0f * Range) / float(Resolution);
 
 	float AlphaO = 1.0f;
 
-	int Substeps = 3;
+	int Substeps = 1;
 
 	float CurrDens = RhoRubber;
+	float SphereFrictionCoefficient = 0.05f;
 	float c = 10.0f;
 	float s = 1.0f;
 	float kProportionality = (c * c) / (s * s);
@@ -163,6 +164,7 @@ namespace Simulation {
 
 				ImGui::SliderInt("Substeps", &Substeps, 1, 100);
 				ImGui::SliderFloat("c", &c, 0.0f, 100.0f);
+				ImGui::SliderFloat("Sphere Friction Coeff", &SphereFrictionCoefficient, 0.0f, 1.0f);
 				ImGui::SliderFloat("Damping Coeff", &DampingCoeff, 0.01f, 4.0f);
 				ImGui::SliderFloat("s", &s, 0.1f, 100.0f);
 				ImGui::SliderFloat("AlphaO", &AlphaO, 0.0f, 1.0f);
@@ -341,8 +343,12 @@ namespace Simulation {
 		for (int x = 0; x < Resolution; x++) {
 			for (int y = 0; y < Resolution; y++) {
 
+				int idx = To1DIdx(x, y);
+
 				float Velocity = WaterVelocities[To1DIdx(x, y)];
-				Heightmap[To1DIdx(x, y)] += Velocity * Dt;
+				Heightmap[idx] += Velocity * Dt;
+				float DeltaH = ObjectHeights[CheckerStep][idx] - ObjectHeights[(int)(!((bool)CheckerStep))][idx];
+				Heightmap[idx] += AlphaO * DeltaH;
 			}
 		}
 
@@ -359,7 +365,8 @@ namespace Simulation {
 				float NetVolumeDisplaced = 0.0f;
 
 				for (int i = 0; i < Spheres.size(); i++) {
-					glm::vec3 rsi = RSI(glm::vec3(WorldSpace.x, 0.0f, WorldSpace.y) - Spheres[i].Position, glm::vec3(0.0f, -1.0f, 0.0f), Spheres[i].Radius);
+					glm::vec3 rsi = RSI(glm::vec3(WorldSpace.x, 1.0f, WorldSpace.y) - Spheres[i].Position, glm::vec3(0.0f, -1.0f, 0.0f), Spheres[i].Radius);
+					
 					float h = rsi.z;
 
 					if (rsi.x < 0.0f && rsi.y < 0.0f) {
@@ -371,7 +378,7 @@ namespace Simulation {
 
 					float Volume = ColumnWidth * ColumnWidth * h;
 					float Fb = RhoWater * 9.81f * Volume;
-					Spheres[i].NetForce += (Fb * glm::vec3(0.0f, 1.0f, 0.0f));
+					Spheres[i].NetForce += (Fb * glm::vec3(0.0f, 1.0f, 0.0f)); // Upward buoyant force
 					NetVolumeDisplaced += h;
 				}
 
@@ -380,18 +387,6 @@ namespace Simulation {
 		}
 	}
 
-	void SimulateWaterCoupling(float Dt) {
-
-		for (int x = 0; x < Resolution; x++) {
-			for (int y = 0; y < Resolution; y++) {
-
-
-
-
-			}
-		}
-
-	}
 
 	void SimulateObjects(float dt) {
 
@@ -403,6 +398,11 @@ namespace Simulation {
 			Sphere& s = Spheres[i];
 
 			s.NetForce += (s.Mass() * g * -jcap);
+
+			// Energy Loss 
+			glm::vec3 OpposingDirection = - (s.Velocity / glm::max(glm::length(s.Velocity), 0.001f));
+			s.NetForce += SphereFrictionCoefficient * s.Mass() * 9.81f * OpposingDirection;
+
 			s.NetAcceleration = s.NetForce / s.Mass();
 			
 			s.NetForce = glm::vec3(0.0f);
