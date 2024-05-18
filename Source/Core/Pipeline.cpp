@@ -11,6 +11,28 @@
 
 namespace Simulation {
 
+	// TODO ; WEight for heightmap contrib
+
+	const glm::vec2 PoissonDisk[32] = {
+		glm::vec2(-0.613392, 0.617481), glm::vec2(0.751946, 0.453352),
+		glm::vec2(0.170019, -0.040254), glm::vec2(0.078707, -0.715323),
+		glm::vec2(-0.299417, 0.791925), glm::vec2(-0.075838, -0.529344),
+		glm::vec2(0.645680, 0.493210), glm::vec2(0.724479, -0.580798),
+		glm::vec2(-0.651784, 0.717887), glm::vec2(0.222999, -0.215125),
+		glm::vec2(0.421003, 0.027070), glm::vec2(-0.467574, -0.405438),
+		glm::vec2(-0.817194, -0.271096), glm::vec2(-0.248268, -0.814753),
+		glm::vec2(-0.705374, -0.668203), glm::vec2(0.354411, -0.887570),
+		glm::vec2(0.977050, -0.108615), glm::vec2(0.175817, 0.382366),
+		glm::vec2(0.063326, 0.142369), glm::vec2(0.487472, -0.063082),
+		glm::vec2(0.203528, 0.214331), glm::vec2(-0.084078, 0.898312),
+		glm::vec2(-0.667531, 0.326090), glm::vec2(0.488876, -0.783441),
+		glm::vec2(-0.098422, -0.295755), glm::vec2(0.470016, 0.217933),
+		glm::vec2(-0.885922, 0.215369), glm::vec2(-0.696890, -0.549791),
+		glm::vec2(0.566637, 0.605213), glm::vec2(-0.149693, 0.605762),
+		glm::vec2(0.039766, -0.396100), glm::vec2(0.034211, 0.979980)
+	};
+
+
 	// kg/m^3
 	const float RhoWater = 998.2f;
 	const float RhoRubber = 1522.0f;
@@ -18,21 +40,21 @@ namespace Simulation {
 
 	float DebugVar = 0.0f;
 
-	int Resolution = 192;
+	int Resolution = 256;
 	float Range = 4.0f;
 	float ColumnWidth = (2.0f * Range) / float(Resolution);
 
-	float AlphaO = 1.0f;
+	float AlphaO = 0.4f;
 
 	int Substeps = 1;
 
 	float CurrDens = RhoRubber;
-	float SphereFrictionCoefficient = 0.05f;
+	float SphereFrictionCoefficient = 0.025f;
 	float c = 10.0f;
 	float s = 1.0f;
 	float kProportionality = (c * c) / (s * s);
 	bool DoSim = false;
-	float DampingCoeff = 0.4f;
+	float DampingCoeff = 0.25f;
 
 	bool PhysicsStep = false;
 
@@ -46,8 +68,12 @@ namespace Simulation {
 
 	typedef glm::vec3 Force;
 
-	int To1DIdx(int x, int y) {
+	inline int To1DIdx(int x, int y) {
 		return (y * Resolution) + x;
+	}
+
+	inline int To1DIdxSafe(int x, int y) {
+		return glm::clamp((y * Resolution) + x, 0, (Resolution * Resolution) - 1);
 	}
 
 	class Sphere {
@@ -354,6 +380,31 @@ namespace Simulation {
 
 	}
 
+	void SmoothObjectMap(float Dt) {
+
+		const int SMOOTHING_ITR = 0;
+
+		for (int k = 0; k < SMOOTHING_ITR; k++) {
+			for (int x = 0; x < Resolution; x++) {
+				for (int y = 0; y < Resolution; y++) {
+
+					float Sum = 0.0f;
+
+					for (int p = -1; p <= 1; p++) {
+						for (int q = -1; q <= 1; q++) {
+							int idx = To1DIdxSafe(x + p, y + q);
+							Sum += ObjectHeights[CheckerStep][idx];
+						}
+					}
+
+					Sum /= 9.0f;
+					ObjectHeights[CheckerStep][To1DIdxSafe(x, y)] = Sum;
+				}
+			}
+		}
+
+	}
+
 	void GenerateObjectMap(float Dt) {
 		for (int x = 0; x < Resolution; x++) {
 			for (int y = 0; y < Resolution; y++) {
@@ -376,6 +427,10 @@ namespace Simulation {
 						h = std::abs(rsi.x - rsi.y);
 					}
 
+					//h += Heightmap[idx] - 1.0f;
+
+					h = glm::max(h, 0.0f);
+
 					float Volume = ColumnWidth * ColumnWidth * h;
 					float Fb = RhoWater * 9.81f * Volume;
 					Spheres[i].NetForce += (Fb * glm::vec3(0.0f, 1.0f, 0.0f)); // Upward buoyant force
@@ -385,6 +440,64 @@ namespace Simulation {
 				(ObjectHeights[CheckerStep])[idx] = NetVolumeDisplaced;
 			}
 		}
+	}
+
+	void CollideObjects(float dt) {
+
+
+		for (int i = 0; i < Spheres.size(); i++) {
+
+			auto& e = Spheres[i];
+
+			for (int j = 0; j < Spheres.size(); j++) {
+
+				if (i == j) {
+					continue;
+				}
+
+				auto& e2 = Spheres[j];
+
+				glm::vec3 DeltaP = e.Position - e2.Position;
+
+				float Length = glm::length(DeltaP);
+
+				glm::vec3 Dir = DeltaP / glm::max(Length, 0.00001f);
+
+				if (Length <= e.Radius + e2.Radius) {
+
+					float Delta = (e.Radius + e2.Radius) - Length;
+
+					glm::vec3 p1, p2;
+
+					p1 = e.Position;
+					p2 = e2.Position;
+
+					e.Position += Delta * Dir * 0.5f;
+					e2.Position -= Delta * Dir * 0.5f;
+
+				}
+
+
+			}
+
+			{
+				float Length = glm::length(e.Position);
+				glm::vec3 Dir = e.Position / glm::max(Length, 0.00001f);
+
+				glm::vec3 p = e.Position;
+
+				if (Length >= 16. - e.Radius) {
+
+					float Delta = (16. - e.Radius) - Length;
+					e.Position += Delta * Dir;
+					e.Velocity = (e.Position - p) / dt;
+				}
+			}
+
+
+
+		}
+
 	}
 
 
@@ -418,6 +531,37 @@ namespace Simulation {
 	}
 
 
+	void DriftSpheres(float Dt) {
+
+		for (int i = 0; i < Spheres.size(); i++) {
+
+			Sphere& s = Spheres[i];
+
+			for (int x = 0; x < 32; x++) {
+
+				glm::vec2 Displaced = glm::vec2(s.Position.x, s.Position.z) + (PoissonDisk[x] * s.Radius);
+				glm::vec2 UV = glm::fract(((Range + Displaced) / Range) * 0.5f);
+				glm::ivec2 Texel = glm::ivec2(UV * float(Resolution));
+
+				float Acceleration = WaterAccelerations[To1DIdxSafe(Texel.x, Texel.y)];
+				float H = Heightmap[To1DIdxSafe(Texel.x, Texel.y)];
+
+				glm::vec3 Vector = glm::vec3(s.Position - glm::vec3(Displaced.x, H, Displaced.y));
+
+				float Length = glm::length(Vector);
+
+				Vector /= glm::max(Length, 0.00001f);
+
+				float Weight = Length / s.Radius;
+
+				s.NetForce += Weight * glm::vec3(0.,1.,0.) * s.Mass() * Vector * Acceleration * DebugVar;
+			}
+
+		}
+
+	}
+
+
 	void SimulateWater(float Dt) {
 
 		float Ddt = Dt / float(Substeps);
@@ -425,9 +569,12 @@ namespace Simulation {
 		for (int i = 0; i < Substeps; i++) {
 
 			GenerateObjectMap(Ddt);
+			SmoothObjectMap(Ddt);
 			SimulateWaterAcceleration(Ddt);
 			SimulateWaterVelocities(Ddt);
 			SimulateWaterHeights(Ddt);
+			//DriftSpheres(Ddt);
+			CollideObjects(Ddt);
 			SimulateObjects(Ddt);
 		}
 

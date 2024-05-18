@@ -90,6 +90,8 @@ void main() {
 
 	o_Color = texture(u_Texture, v_TexCoords);
 
+    bool Transparent = false;
+
     if (Depth > 1.0f - 0.00001f) {
         o_Color = vec4(SkyColour(RayDirection), 1.);
     }
@@ -97,7 +99,7 @@ void main() {
    for (int i = 0 ; i < u_Spheres ; i ++) {
        float T = TraceSphere(RayOrigin - SphereData[i].xyz, RayDirection, SphereData[i].w);
    
-       if (T > 0.0f && T < Dist) {
+       if (T > 0.0f && T < Dist && (int(gl_FragCoord.x + gl_FragCoord.y) % 2 == 0 || !Transparent)) {
            o_Color = vec4(vec3(1.,0.,0.),1.);
            Dist = T;
        }
