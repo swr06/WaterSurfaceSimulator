@@ -11,6 +11,8 @@
 
 namespace Simulation {
 
+	float DebugVar = 0.0f;
+
 	int Resolution = 192;
 	float Range = 4.0f;
 	float Width = Range / Resolution;
@@ -25,8 +27,10 @@ namespace Simulation {
 
 	bool PhysicsStep = false;
 
+	int CheckerStep = 0; // Global variable that oscillates b/w 0 and 1
+
 	float* Heightmap;
-	float* ObjectHeights;
+	float* ObjectHeights[2];
 	float* WaterVelocities;
 	float* WaterAccelerations;
 	Random RandomGen;
@@ -63,6 +67,38 @@ namespace Simulation {
 
 	std::vector<Object> Objects;
 
+	glm::vec3 RSI(glm::vec3 Origin, glm::vec3 Dir, float Radius)
+	{
+		using namespace glm;
+		float VoV = dot(Dir, Dir);
+		float Acc = VoV * Radius * Radius;
+
+		// Solve quadratic 
+		Acc += 2.0 * Origin.x * dot(glm::vec2(Origin.y, Origin.z), glm::vec2(Dir.y, Dir.z)) * Dir.x;
+		Acc += 2.0 * Origin.y * Origin.z * Dir.y * Dir.z;
+		Acc -= dot(Origin * Origin, vec3(dot(glm::vec2(Dir.y, Dir.z), glm::vec2(Dir.y, Dir.z)), dot(glm::vec2(Dir.x, Dir.z), glm::vec2(Dir.x, Dir.z)), dot(glm::vec2(Dir.x, Dir.y), glm::vec2(Dir.x, Dir.y))));
+
+		// No intersect 
+		if (Acc < 0.0)
+		{
+			return glm::vec3(-1.0f);
+		}
+
+		Acc = sqrt(Acc);
+
+		float Dist1 = (Acc - dot(Origin, Dir)) / VoV;
+		float Dist2 = -(Acc + dot(Origin, Dir)) / VoV;
+
+		if (Dist1 >= 0.0 && Dist2 >= 0.0)
+		{
+			return glm::vec3(Dist1, Dist2, min(Dist1, Dist2));
+		}
+		else
+		{
+			return glm::vec3(Dist1, Dist2, max(Dist1, Dist2));
+		}
+	}
+
 	class RayTracerApp : public Simulation::Application
 	{
 	public:
@@ -95,6 +131,9 @@ namespace Simulation {
 			ImGuiIO& io = ImGui::GetIO();
 			if (ImGui::Begin("Debug/Edit Mode")) {
 
+				ImGui::SliderFloat("DebugVar", &DebugVar, -1., 1.0f);
+				ImGui::NewLine();
+
 				ImGui::Text("Camera Position : %f,  %f,  %f", Camera.GetPosition().x, Camera.GetPosition().y, Camera.GetPosition().z);
 				ImGui::Text("Camera Front : %f,  %f,  %f", Camera.GetFront().x, Camera.GetFront().y, Camera.GetFront().z);
 				ImGui::Text("Time : %f s", glfwGetTime());
@@ -113,17 +152,17 @@ namespace Simulation {
 					Heightmap[int(RandomGen.Float() * Resolution * Resolution)] = 1.5;
 					Heightmap[int(RandomGen.Float() * Resolution * Resolution)] = 0.5f;
 				}
-				
+
 				if (ImGui::Button("Reset")) {
-					
+
 					for (int i = 0; i < Resolution * Resolution; i++) {
 						Heightmap[i] = 1.f;
 					}
 
 					memset(WaterAccelerations, 0, Resolution * Resolution * sizeof(float));
 					memset(WaterVelocities, 0, Resolution * Resolution * sizeof(float));
-					memset(ObjectHeights, 0, Resolution * Resolution * sizeof(float));
-
+					memset(ObjectHeights[0], 0, Resolution * Resolution * sizeof(float));
+					memset(ObjectHeights[1], 0, Resolution * Resolution * sizeof(float));
 				}
 
 
@@ -220,6 +259,10 @@ namespace Simulation {
 		return ((glm::vec2(Texel) / float(Resolution)) * 2.0f - 1.0f) * Range;
 	}
 
+	glm::vec2 ConvertToWorldSpaceTexelCenter(const glm::ivec2& Texel) {
+		return (((glm::vec2(Texel) + 0.5f) / float(Resolution)) * 2.0f - 1.0f) * Range;
+	}
+
 	float SampleHeightClamped(int x, int y) {
 		x = glm::clamp(x, 0, Resolution - 1);
 		y = glm::clamp(y, 0, Resolution - 1);
@@ -280,6 +323,48 @@ namespace Simulation {
 
 				float Velocity = WaterVelocities[To1DIdx(x, y)];
 				Heightmap[To1DIdx(x, y)] += Velocity * Dt;
+			}
+		}
+
+	}
+
+	void GenerateObjectMap(float Dt) {
+		for (int x = 0; x < Resolution; x++) {
+			for (int y = 0; y < Resolution; y++) {
+				int idx = To1DIdx(x, y);
+
+				// World space position of grid cell center
+				glm::vec2 WorldSpace = ConvertToWorldSpaceTexelCenter(glm::ivec2(x, y));
+
+				float NetVolumeDisplaced = 0.0f;
+
+				for (int i = 0; i < Spheres.size(); i++) {
+					glm::vec3 rsi = RSI(glm::vec3(WorldSpace.x, 1.0f, WorldSpace.y) - Spheres[i].Position, glm::vec3(0.0f, -1.0f, 0.0f), Spheres[i].Radius);
+					float h = rsi.z;
+
+					if (rsi.x < 0.0f && rsi.y < 0.0f) {
+						h = 0.0f;
+					}
+					else if (rsi.x > 0.0f && rsi.y > 0.0f) {
+						h = std::abs(rsi.x - rsi.y);
+					}
+					
+					NetVolumeDisplaced += h;
+				}
+
+				(ObjectHeights[CheckerStep])[idx] = NetVolumeDisplaced;
+			}
+		}
+	}
+
+	void SimulateWaterCoupling(float Dt) {
+
+		for (int x = 0; x < Resolution; x++) {
+			for (int y = 0; y < Resolution; y++) {
+
+
+
+
 			}
 		}
 
@@ -435,13 +520,16 @@ namespace Simulation {
 
 		// Create Heightmaps
 		Heightmap = new float[Resolution * Resolution];
-		ObjectHeights = new float[Resolution * Resolution];
+		ObjectHeights[0] = new float[Resolution * Resolution];
+		ObjectHeights[1] = new float[Resolution * Resolution];
 		WaterVelocities = new float[Resolution * Resolution];
 		WaterAccelerations = new float[Resolution * Resolution];
+
 		memset(Heightmap, 0, Resolution * Resolution * sizeof(float));
 		memset(WaterAccelerations, 0, Resolution * Resolution * sizeof(float));
 		memset(WaterVelocities, 0, Resolution * Resolution * sizeof(float));
-		memset(ObjectHeights, 0, Resolution * Resolution * sizeof(float));
+		memset(ObjectHeights[0], 0, Resolution * Resolution * sizeof(float));
+		memset(ObjectHeights[1], 0, Resolution * Resolution * sizeof(float));
 
 		// GPU Data
 		GLuint HeightmapSSBO = 0;
@@ -460,7 +548,7 @@ namespace Simulation {
 
 		// Make Spheres
 
-		Sphere s1 = { glm::vec3(0.0f), glm::vec3(0.0f), 1.0f, 1.0f, 0.5f, glm::vec3(0.0f), {}};
+		Sphere s1 = { glm::vec3(0.0f), glm::vec3(0.0f), 1.0f, 1.0f, 0.5f, glm::vec3(0.0f), {} };
 		Spheres.push_back(s1);
 
 		glClearColor(0.0f, 0.0f, 0.0f, 0.0f);
@@ -471,6 +559,7 @@ namespace Simulation {
 
 		while (!glfwWindowShouldClose(app.GetWindow())) {
 
+			CheckerStep = app.GetCurrentFrame() % 2;
 			kProportionality = (c * c) / (s * s);
 
 			glDisable(GL_CULL_FACE);
@@ -492,6 +581,8 @@ namespace Simulation {
 				PhysicsStep = false;
 			}
 
+			///!
+			GenerateObjectMap(DeltaTime);
 			///
 
 			// Upadate spheres
@@ -508,7 +599,7 @@ namespace Simulation {
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, SphereSSBO);
 			glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(RenderSphere) * Data.size(), Data.data(), GL_DYNAMIC_DRAW);
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, HeightmapSSBO);
-			glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(float)*Resolution*Resolution, Heightmap, GL_DYNAMIC_DRAW);
+			glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(float) * Resolution * Resolution, Heightmap, GL_DYNAMIC_DRAW);
 
 			// GBuffer
 			GBuffer[0].Bind();
@@ -544,24 +635,24 @@ namespace Simulation {
 
 			GBuffer[1].Bind();
 			RTSphere.Use();
-			
+
 			RTSphere.SetInteger("u_Texture", 0);
 			RTSphere.SetInteger("u_Depth", 1);
 			RTSphere.SetInteger("u_Spheres", Spheres.size());
-			
+
 			RTSphere.SetFloat("u_zNear", Camera.GetNearPlane());
 			RTSphere.SetFloat("u_zFar", Camera.GetFarPlane());
 			RTSphere.SetMatrix4("u_InverseProjection", glm::inverse(Camera.GetProjectionMatrix()));
 			RTSphere.SetMatrix4("u_InverseView", glm::inverse(Camera.GetViewMatrix()));
-			
+
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, SphereSSBO);
-			
+
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, GBuffer[0].GetTexture());
-			
+
 			glActiveTexture(GL_TEXTURE1);
 			glBindTexture(GL_TEXTURE_2D, GBuffer[0].GetDepthBuffer());
-			
+
 			ScreenQuadVAO.Bind();
 			glDrawArrays(GL_TRIANGLES, 0, 6);
 			ScreenQuadVAO.Unbind();
