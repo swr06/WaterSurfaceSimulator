@@ -1,7 +1,7 @@
 #version 450 core 
 
 layout (location = 0) out vec4 o_Color;
-layout (location = 0) out vec4 o_Normal;
+layout (location = 1) out vec4 o_Normal;
 
 in vec3 v_WorldPos;
 

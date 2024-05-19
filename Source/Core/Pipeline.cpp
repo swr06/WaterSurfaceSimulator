@@ -7,7 +7,10 @@
 #include "FpsCamera.h"
 #include "Player.h"
 
-#define MAX_SPHERES 16
+#define MAX_SPHERES 24
+
+// in meters
+#define MAX_WAVE_HEIGHT 8 
 
 namespace Simulation {
 
@@ -48,14 +51,21 @@ namespace Simulation {
 
 	int Substeps = 1;
 
+	int SMOOTHING_ITR = 0;
+
 	float CurrDens = RhoRubber;
 	float SphereFrictionCoefficient = 0.025f;
-	float c = 10.0f;
+	float c = 12.0f;
 	float s = 1.0f;
 	float kProportionality = (c * c) / (s * s);
 	bool DoSim = false;
 	float DampingCoeff = 0.25f;
 
+	bool RenderSpheres = true;
+
+	bool DoContainerCollisions = false;
+	bool DoSSCollisions = true;
+	
 	bool PhysicsStep = false;
 
 	int CheckerStep = 0; // Global variable that oscillates b/w 0 and 1
@@ -105,7 +115,7 @@ namespace Simulation {
 	float CurrentTime = glfwGetTime();
 	float Frametime = 0.0f;
 	float DeltaTime = 0.0f;
-	bool WireFrame = false;
+	bool WireFrame = true;
 
 	Player MainPlayer;
 	FPSCamera& Camera = MainPlayer.Camera;
@@ -185,18 +195,24 @@ namespace Simulation {
 
 				ImGui::NewLine();
 				ImGui::Checkbox("Do Sim", &DoSim);
+				ImGui::Checkbox("Do Sphere-Sphere Collisions", &DoSSCollisions);
+				ImGui::Checkbox("Do Sphere-Container Collisions", &DoContainerCollisions);
+				ImGui::Checkbox("Render Spheres", &RenderSpheres);
 
 				PhysicsStep = ImGui::Button("Step Simulation");
 
 				ImGui::SliderInt("Substeps", &Substeps, 1, 100);
-				ImGui::SliderFloat("c", &c, 0.0f, 100.0f);
+				ImGui::SliderFloat("Range of water volume", &Range, 0.1f, 32.0f);
+				ImGui::SliderFloat("c", &c, 0.0f, 24.0f);
+				ImGui::SliderFloat("s", &s, 0.1f, 10.0f);
 				ImGui::SliderFloat("Sphere Friction Coeff", &SphereFrictionCoefficient, 0.0f, 1.0f);
 				ImGui::SliderFloat("Damping Coeff", &DampingCoeff, 0.01f, 4.0f);
-				ImGui::SliderFloat("s", &s, 0.1f, 100.0f);
-				ImGui::SliderFloat("AlphaO", &AlphaO, 0.0f, 1.0f);
-				ImGui::SliderFloat("CurrDens", &CurrDens, 2.0f, 4000.0f);
-				
-				if (ImGui::Button("Mod")) {
+				ImGui::SliderFloat("Alpha (Coefficient of Object-Water Interaction)", &AlphaO, 0.0f, 1.0f);
+				ImGui::SliderInt("Smooth Interaction Map", &SMOOTHING_ITR, 0, 4);
+
+				ImGui::NewLine();
+
+				if (ImGui::Button("*Create Water Disturbance")) {
 					Heightmap[int(RandomGen.Float() * Resolution * Resolution)] = 1.5;
 					Heightmap[int(RandomGen.Float() * Resolution * Resolution)] = 0.5f;
 				}
@@ -213,15 +229,16 @@ namespace Simulation {
 					memset(ObjectHeights[1], 0, Resolution * Resolution * sizeof(float));
 				}
 
-
-
+				ImGui::NewLine();
 				ImGui::NewLine();
 
 				ImGui::Checkbox("Wireframe", &WireFrame);
+				//ImGui::Checkbox("Do Sphere Collisions", &DoCollisions);
+				
 
 				ImGui::NewLine();
 				ImGui::NewLine();
-
+				
 				if (Spheres.size() < MAX_SPHERES) {
 					if (ImGui::Button("Place Sphere")) {
 						Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (r * 2.1f)), glm::vec3(0.0f), CurrDens, r, glm::vec3(0.0f), {} };
@@ -229,6 +246,7 @@ namespace Simulation {
 					}
 
 					ImGui::SliderFloat("Radii of Sphere", &r, 0.05f, 2.0f);
+					ImGui::SliderFloat("Sphere Density (Density of water is 1000 kg/m3)", &CurrDens, 2.0f, 4000.0f);
 				}
 				ImGui::NewLine();
 
@@ -236,6 +254,12 @@ namespace Simulation {
 					if (ImGui::Button("Delete Sphere")) {
 						Spheres.pop_back();
 					}
+				}
+
+				ImGui::NewLine();
+
+				if (ImGui::Button("Delete ALL Spheres")) {
+					Spheres.clear();
 				}
 
 			} ImGui::End();
@@ -366,6 +390,8 @@ namespace Simulation {
 
 	void SimulateWaterHeights(float Dt) {
 
+		float Max = 0.0f;
+
 		for (int x = 0; x < Resolution; x++) {
 			for (int y = 0; y < Resolution; y++) {
 
@@ -374,15 +400,24 @@ namespace Simulation {
 				float Velocity = WaterVelocities[To1DIdx(x, y)];
 				Heightmap[idx] += Velocity * Dt;
 				float DeltaH = ObjectHeights[CheckerStep][idx] - ObjectHeights[(int)(!((bool)CheckerStep))][idx];
+			
+				// Fix Spikes of instability 
+				Max = glm::max(Max, DeltaH);
+
+				DeltaH = glm::min(DeltaH, 0.1f);
+				
 				Heightmap[idx] += AlphaO * DeltaH;
+
+				Heightmap[idx] = glm::clamp(Heightmap[idx], -float(MAX_WAVE_HEIGHT), float(MAX_WAVE_HEIGHT));
 			}
 		}
+
+		//std::cout << "\n" << Max;
 
 	}
 
 	void SmoothObjectMap(float Dt) {
 
-		const int SMOOTHING_ITR = 0;
 
 		for (int k = 0; k < SMOOTHING_ITR; k++) {
 			for (int x = 0; x < Resolution; x++) {
@@ -405,6 +440,11 @@ namespace Simulation {
 
 	}
 
+	// r -> [0,1]
+	float OMapWt(float r) {
+		return glm::clamp(exp(-4.0f * r * r) - 0.01f, 0.0f, 1.0f);
+	}
+
 	void GenerateObjectMap(float Dt) {
 		for (int x = 0; x < Resolution; x++) {
 			for (int y = 0; y < Resolution; y++) {
@@ -420,6 +460,7 @@ namespace Simulation {
 					
 					float h = rsi.z;
 
+
 					if (rsi.x < 0.0f && rsi.y < 0.0f) {
 						h = 0.0f;
 					}
@@ -431,10 +472,11 @@ namespace Simulation {
 
 					h = glm::max(h, 0.0f);
 
+
 					float Volume = ColumnWidth * ColumnWidth * h;
 					float Fb = RhoWater * 9.81f * Volume;
 					Spheres[i].NetForce += (Fb * glm::vec3(0.0f, 1.0f, 0.0f)); // Upward buoyant force
-					NetVolumeDisplaced += h;
+					NetVolumeDisplaced += h * OMapWt(glm::clamp(rsi.z / 8.0f, 0.0f, 1.0f));;
 				}
 
 				(ObjectHeights[CheckerStep])[idx] = NetVolumeDisplaced;
@@ -449,37 +491,40 @@ namespace Simulation {
 
 			auto& e = Spheres[i];
 
-			for (int j = 0; j < Spheres.size(); j++) {
+			if (DoSSCollisions) {
+				for (int j = 0; j < Spheres.size(); j++) {
 
-				if (i == j) {
-					continue;
+					if (i == j) {
+						continue;
+					}
+
+					auto& e2 = Spheres[j];
+
+					glm::vec3 DeltaP = e.Position - e2.Position;
+
+					float Length = glm::length(DeltaP);
+
+					glm::vec3 Dir = DeltaP / glm::max(Length, 0.00001f);
+
+					if (Length <= e.Radius + e2.Radius) {
+
+						float Delta = (e.Radius + e2.Radius) - Length;
+
+						glm::vec3 p1, p2;
+
+						p1 = e.Position;
+						p2 = e2.Position;
+
+						e.Position += Delta * Dir * 0.5f;
+						e2.Position -= Delta * Dir * 0.5f;
+
+					}
+
+
 				}
-
-				auto& e2 = Spheres[j];
-
-				glm::vec3 DeltaP = e.Position - e2.Position;
-
-				float Length = glm::length(DeltaP);
-
-				glm::vec3 Dir = DeltaP / glm::max(Length, 0.00001f);
-
-				if (Length <= e.Radius + e2.Radius) {
-
-					float Delta = (e.Radius + e2.Radius) - Length;
-
-					glm::vec3 p1, p2;
-
-					p1 = e.Position;
-					p2 = e2.Position;
-
-					e.Position += Delta * Dir * 0.5f;
-					e2.Position -= Delta * Dir * 0.5f;
-
-				}
-
-
 			}
 
+			if (DoContainerCollisions)
 			{
 				float Length = glm::length(e.Position);
 				glm::vec3 Dir = e.Position / glm::max(Length, 0.00001f);
@@ -574,7 +619,10 @@ namespace Simulation {
 			SimulateWaterVelocities(Ddt);
 			SimulateWaterHeights(Ddt);
 			//DriftSpheres(Ddt);
-			CollideObjects(Ddt);
+
+			if (DoContainerCollisions || DoSSCollisions)
+				CollideObjects(Ddt);
+
 			SimulateObjects(Ddt);
 		}
 
@@ -631,8 +679,8 @@ namespace Simulation {
 
 				for (int y = -Resolution; y <= Resolution; y++) {
 
-					float Cx = (Range / (float)(Resolution)) * float(x);
-					float Cy = (Range / (float)(Resolution)) * float(y);
+					float Cx = (1. / (float)(Resolution)) * float(x);
+					float Cy = (1. / (float)(Resolution)) * float(y);
 
 					BufferData.push_back(Cx);
 					BufferData.push_back(Cy);
@@ -728,6 +776,7 @@ namespace Simulation {
 
 			CheckerStep = app.GetCurrentFrame() % 2;
 			kProportionality = (c * c) / (s * s);
+			ColumnWidth = (2.0f * Range) / float(Resolution);
 
 			glDisable(GL_CULL_FACE);
 
@@ -802,6 +851,7 @@ namespace Simulation {
 			RTSphere.SetInteger("u_Texture", 0);
 			RTSphere.SetInteger("u_Depth", 1);
 			RTSphere.SetInteger("u_Spheres", Spheres.size());
+			RTSphere.SetBool("u_RenderSpheres", RenderSpheres);
 
 			RTSphere.SetFloat("u_zNear", Camera.GetNearPlane());
 			RTSphere.SetFloat("u_zFar", Camera.GetFarPlane());

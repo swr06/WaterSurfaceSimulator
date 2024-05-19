@@ -1,4 +1,4 @@
-#version 330 core
+#version 450 core
 
 layout (location = 0) in vec2 a_Position;
 
@@ -20,11 +20,13 @@ int To1DIdx(int x, int y) {
 }
 
 float Sample(vec2 UV) {
-	ivec2 Texel = ivec2(fract(UV) * vec2(float(u_ResV)));
+	ivec2 Texel = ivec2((UV) * vec2(float(u_ResV)));
 	return Heightmap[To1DIdx(Texel.x, Texel.y)];
 }
 
 float Sample(ivec2 px) {
+    
+    px = clamp(px, ivec2(0), ivec2(u_ResV - 1));
 	return Heightmap[To1DIdx(px.x, px.y)];
 }
 
@@ -55,12 +57,12 @@ float Bilinear(vec2 SampleUV)
 
 void main()
 {
-	gl_Position = u_ModelMatrix * vec4(a_Position, 1.0f, 1.0f);
+	gl_Position = u_ModelMatrix * vec4(a_Position * u_RangeV, 1.0f, 1.0f);
     gl_Position.y += 1.0f;
 	
     v_WorldPos = vec3(gl_Position.xyz);
 
-    vec2 UV = fract(((u_RangeV + v_WorldPos.xz) / u_RangeV) * 0.5f);
+    vec2 UV = (((u_RangeV + v_WorldPos.xz) / u_RangeV) * 0.5f);
 
     float Height = Bilinear(UV);
     gl_Position.y += Height;

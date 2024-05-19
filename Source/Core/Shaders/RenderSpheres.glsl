@@ -12,6 +12,8 @@ uniform float u_zFar;
 
 uniform int u_Spheres;
 
+uniform bool u_RenderSpheres;
+
 uniform mat4 u_InverseProjection;
 uniform mat4 u_InverseView;
 
@@ -96,13 +98,14 @@ void main() {
         o_Color = vec4(SkyColour(RayDirection), 1.);
     }
 
-   for (int i = 0 ; i < u_Spheres ; i ++) {
-       float T = TraceSphere(RayOrigin - SphereData[i].xyz, RayDirection, SphereData[i].w);
+    if (u_RenderSpheres) {
+       for (int i = 0 ; i < u_Spheres ; i ++) {
+           float T = TraceSphere(RayOrigin - SphereData[i].xyz, RayDirection, SphereData[i].w);
    
-       if (T > 0.0f && T < Dist && (int(gl_FragCoord.x + gl_FragCoord.y) % 2 == 0 || !Transparent)) {
-           o_Color = vec4(vec3(1.,0.,0.),1.);
-           Dist = T;
+           if (T > 0.0f && T < Dist && (int(gl_FragCoord.x + gl_FragCoord.y) % 2 == 0 || !Transparent)) {
+               o_Color = vec4(vec3(1.,0.,0.),1.);
+               Dist = T;
+           }
        }
    }
-
 }
