@@ -55,6 +55,8 @@ namespace Simulation {
 
 	float CurrDens = RhoRubber;
 	float SphereFrictionCoefficient = 0.025f;
+	float SphereVel = 4.0f;
+	static float SphereRad = 0.25f;
 	float c = 12.0f;
 	float s = 1.0f;
 	float kProportionality = (c * c) / (s * s);
@@ -181,7 +183,6 @@ namespace Simulation {
 
 		void OnImguiRender(double ts) override
 		{
-			static float r = 0.5f;
 
 			ImGuiIO& io = ImGui::GetIO();
 			if (ImGui::Begin("Debug/Edit Mode")) {
@@ -240,13 +241,24 @@ namespace Simulation {
 				ImGui::NewLine();
 				
 				if (Spheres.size() < MAX_SPHERES) {
-					if (ImGui::Button("Place Sphere")) {
-						Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (r * 2.1f)), glm::vec3(0.0f), CurrDens, r, glm::vec3(0.0f), {} };
+					if (ImGui::Button("PLACE Sphere")) {
+						Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (SphereRad * 2.1f)), glm::vec3(0.0f), CurrDens, SphereRad, glm::vec3(0.0f), {} };
 						Spheres.push_back(s1);
 					}
 
-					ImGui::SliderFloat("Radii of Sphere", &r, 0.05f, 2.0f);
+					ImGui::NewLine();
+
+					if (ImGui::Button("THROW Sphere")) {
+						Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (SphereRad * 2.1f)), Camera.GetFront() * SphereVel, CurrDens, SphereRad, glm::vec3(0.0f), {}};
+						Spheres.push_back(s1);
+					}
+
+					ImGui::NewLine();
+
+					ImGui::SliderFloat("Radii of Sphere", &SphereRad, 0.05f, 2.0f);
 					ImGui::SliderFloat("Sphere Density (Density of water is 1000 kg/m3)", &CurrDens, 2.0f, 4000.0f);
+					ImGui::SliderFloat("Magnitude of velocity of sphere", &SphereVel, 0.0f, 16.0f);
+					
 				}
 				ImGui::NewLine();
 
@@ -316,6 +328,17 @@ namespace Simulation {
 				vsync = !vsync;
 			}
 
+			if (e.type == Simulation::EventTypes::KeyPress && e.key == GLFW_KEY_Q && this->GetCurrentFrame() > 5 && Spheres.size() < MAX_SPHERES)
+			{
+				Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (SphereRad * 2.1f)), Camera.GetFront() * SphereVel, CurrDens, SphereRad, glm::vec3(0.0f), {} };
+				Spheres.push_back(s1);
+			}
+
+			if (e.type == Simulation::EventTypes::KeyPress && e.key == GLFW_KEY_E && this->GetCurrentFrame() > 5 && Spheres.size() < MAX_SPHERES)
+			{
+				Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (SphereRad * 2.1f)), Camera.GetFront() * 0.f, CurrDens, SphereRad, glm::vec3(0.0f), {} };
+				Spheres.push_back(s1);
+			}
 
 
 		}
@@ -521,6 +544,36 @@ namespace Simulation {
 					}
 
 
+				}
+			}
+
+			{
+				float PlayerRadius = 0.08f;
+
+				glm::vec3 DeltaP = e.Position - Camera.GetPosition();
+
+				float Length = glm::length(DeltaP);
+
+				// DESPAWN IF TOO FAR
+				if (Length > 4.0f * Range) {
+					Spheres.erase(Spheres.begin() + i);
+				}
+
+				else {
+
+					glm::vec3 Dir = DeltaP / glm::max(Length, 0.00001f);
+
+					if (Length <= e.Radius + PlayerRadius) {
+
+						float Delta = (e.Radius + PlayerRadius) - Length;
+
+						glm::vec3 p1, p2;
+
+						p1 = e.Position;
+
+						e.Position += Delta * Dir;
+
+					}
 				}
 			}
 

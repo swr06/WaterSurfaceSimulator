@@ -58,7 +58,7 @@ void main() {
 	vec2 UV = fract(((u_Range + v_WorldPos.xz) / u_Range) * 0.5f);
 
     float HeightAt = clamp(Bilinear(UV), 0., 1.);
-    //HeightAt = pow(HeightAt, 32.0f);
+    HeightAt = pow(HeightAt, 128.0f);
 
     // Idea : Find vertex normals via screenspace derivatives 
     // Create an orthonormal basis? (TBN), orient High freequency normals to it! 
