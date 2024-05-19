@@ -122,7 +122,7 @@ void main() {
     vec3 Reflected = (TraceScene(WorldPos, ReflectedDir) > 0.0f) ? vec3(1.,0.,0.) : texture(u_Skybox, ReflectedDir).xyz;
     float Fresnel = (pow(1.0 - max(0.0, dot(-vec3(0.,1.,0.), RayDirection)), 2.5));;
 
-    vec3 C = mix(Refracted * vec3(0.75f, 0.9f, 1.4f), Reflected * 1.15f, Fresnel);
+    vec3 C = mix(Refracted * vec3(0.75f, 0.9f, 1.4f), Reflected * 1.1f, Fresnel);
 
     o_Color = vec4(C,1.);
 
