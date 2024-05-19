@@ -7,6 +7,8 @@
 #include "FpsCamera.h"
 #include "Player.h"
 
+#include "GLClasses/CubeTextureMap.h"
+
 #define MAX_SPHERES 24
 
 // in meters
@@ -117,7 +119,7 @@ namespace Simulation {
 	float CurrentTime = glfwGetTime();
 	float Frametime = 0.0f;
 	float DeltaTime = 0.0f;
-	bool WireFrame = true;
+	bool WireFrame = false;
 
 	Player MainPlayer;
 	FPSCamera& Camera = MainPlayer.Camera;
@@ -697,6 +699,17 @@ namespace Simulation {
 		GLClasses::IndexBuffer WaterMeshEBO;
 		GLClasses::VertexArray WaterMeshVAO;
 
+		GLClasses::CubeTextureMap Skybox;
+		Skybox.CreateCubeTextureMap({
+		   "Res/Sky/right.bmp",
+		   "Res/Sky/left.bmp",
+		   "Res/Sky/top.bmp",
+		   "Res/Sky/bottom.bmp",
+		   "Res/Sky/front.bmp",
+		   "Res/Sky/back.bmp"
+			});
+
+
 		RandomGen.Float();
 
 		//GLClasses::Texture Heightmap;
@@ -777,7 +790,7 @@ namespace Simulation {
 		GLClasses::Shader& BasicRender = ShaderManager::GetShader("BASICRENDER");
 		GLClasses::Shader& RTSphere = ShaderManager::GetShader("SPHERE");
 
-		GLClasses::Framebuffer GBuffer[2] = { GLClasses::Framebuffer(16, 16, {{GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, false, false},  {GL_RGBA16F, GL_RGBA, GL_FLOAT, false, false}}, true, true), GLClasses::Framebuffer(16, 16, {{GL_RGBA, GL_RGBA, GL_UNSIGNED_BYTE, false, false}, {GL_RGBA16F, GL_RGBA, GL_FLOAT, false, false}}, true, true) };
+		GLClasses::Framebuffer GBuffer[2] = { GLClasses::Framebuffer(16, 16, {{GL_RGBA16F, GL_RGBA, GL_FLOAT, false, false},  {GL_RGBA16F, GL_RGBA, GL_FLOAT, false, false}}, true, true), GLClasses::Framebuffer(16, 16, {{GL_RGBA16F, GL_RGBA, GL_FLOAT, false, false}, {GL_RGBA16F, GL_RGBA, GL_FLOAT, false, false}}, true, true) };
 
 		// Spheres
 		GLuint SphereSSBO = 0;
@@ -903,6 +916,8 @@ namespace Simulation {
 
 			RTSphere.SetInteger("u_Texture", 0);
 			RTSphere.SetInteger("u_Depth", 1);
+			RTSphere.SetInteger("u_Skybox", 2);
+			
 			RTSphere.SetInteger("u_Spheres", Spheres.size());
 			RTSphere.SetBool("u_RenderSpheres", RenderSpheres);
 
@@ -918,6 +933,9 @@ namespace Simulation {
 
 			glActiveTexture(GL_TEXTURE1);
 			glBindTexture(GL_TEXTURE_2D, GBuffer[0].GetDepthBuffer());
+
+			glActiveTexture(GL_TEXTURE2);
+			glBindTexture(GL_TEXTURE_CUBE_MAP, Skybox.GetID());
 
 			ScreenQuadVAO.Bind();
 			glDrawArrays(GL_TRIANGLES, 0, 6);

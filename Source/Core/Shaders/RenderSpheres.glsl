@@ -5,7 +5,9 @@ layout (location = 0) out vec4 o_Color;
 in vec2 v_TexCoords;
 
 uniform sampler2D u_Texture;
+uniform sampler2D u_Normals;
 uniform sampler2D u_Depth;
+uniform samplerCube u_Skybox;
 
 uniform float u_zNear;
 uniform float u_zFar;
@@ -79,33 +81,62 @@ vec3 WorldPosFromDepth(float depth, vec2 txc)
     return WorldPos.xyz;
 }
 
+float TraceScene(vec3 O, vec3 D) {
+
+    float Dist = 100000.;
+    bool Int = false;
+
+    for (int i = 0 ; i < u_Spheres ; i ++) {
+           float T = TraceSphere(O - SphereData[i].xyz, D, SphereData[i].w);
+   
+           if (T > 0.0f && T < Dist) {
+               Dist = T;
+               Int = true;
+           }
+       }
+
+    return Int ? Dist : -1.;
+
+}
+
 void main() {
 
 	vec3 RayOrigin = u_InverseView[3].xyz;
-	vec3 RayDirection = SampleIncidentRayDirection(v_TexCoords);
+	vec3 RayDirection = (SampleIncidentRayDirection(v_TexCoords));
 
     float Depth = texture(u_Depth, v_TexCoords).x;
     float LinearDepth = LinearizeDepth(Depth);
 
     vec3 WorldPos = WorldPosFromDepth(Depth, v_TexCoords);
+
+    vec3 R = normalize(WorldPos - RayOrigin);
+
     float Dist = distance(RayOrigin, WorldPos);
 
-	o_Color = texture(u_Texture, v_TexCoords);
+	vec3 NormalsSampled = normalize(texture(u_Texture, v_TexCoords).xyz);
+    
+    vec3 ReflectedDir = reflect(RayDirection, NormalsSampled);
+    vec3 RefractedDir = refract(RayDirection, NormalsSampled, 1. / 1.3);
+
+    vec3 Refracted = (TraceScene(WorldPos, RefractedDir) > 0.0f) ? vec3(1.,0.,0.) : texture(u_Skybox, RefractedDir).xyz;
+    vec3 Reflected = (TraceScene(WorldPos, ReflectedDir) > 0.0f) ? vec3(1.,0.,0.) : texture(u_Skybox, ReflectedDir).xyz;
+    float Fresnel = (pow(1.0 - max(0.0, dot(-vec3(0.,1.,0.), RayDirection)), 2.5));;
+
+    vec3 C = mix(Refracted * vec3(0.75f, 0.9f, 1.4f), Reflected * 1.15f, Fresnel);
+
+    o_Color = vec4(C,1.);
 
     bool Transparent = false;
 
     if (Depth > 1.0f - 0.00001f) {
-        o_Color = vec4(SkyColour(RayDirection), 1.);
+        o_Color = vec4(texture(u_Skybox, RayDirection).xyz, 1.);
     }
 
     if (u_RenderSpheres) {
-       for (int i = 0 ; i < u_Spheres ; i ++) {
-           float T = TraceSphere(RayOrigin - SphereData[i].xyz, RayDirection, SphereData[i].w);
-   
-           if (T > 0.0f && T < Dist && (int(gl_FragCoord.x + gl_FragCoord.y) % 2 == 0 || !Transparent)) {
-               o_Color = vec4(vec3(1.,0.,0.),1.);
-               Dist = T;
-           }
+       float t = TraceScene(RayOrigin, RayDirection);
+
+       if (t > 0. && t < Dist) {
+           o_Color = vec4(vec3(1.,0.,0.),1.);
        }
-   }
+    } 
 }

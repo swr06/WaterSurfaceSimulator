@@ -24,7 +24,7 @@ float Sample(vec2 UV) {
 	return Heightmap[To1DIdx(Texel.x, Texel.y)];
 }
 
-float Sample(ivec2 px) {
+float SamplePx(ivec2 px) {
 	return Heightmap[To1DIdx(px.x, px.y)];
 }
 
@@ -40,10 +40,10 @@ float Bilinear(vec2 SampleUV)
 
     // Fetch 4 neighbours
     float Fetch[4];
-    Fetch[0] = Sample(ivec2(SamplingFragment) + Cross[0]);
-    Fetch[1] = Sample(ivec2(SamplingFragment) + Cross[1]);
-    Fetch[2] = Sample(ivec2(SamplingFragment) + Cross[2]);
-    Fetch[3] = Sample(ivec2(SamplingFragment) + Cross[3]);
+    Fetch[0] = SamplePx(ivec2(SamplingFragment) + Cross[0]);
+    Fetch[1] = SamplePx(ivec2(SamplingFragment) + Cross[1]);
+    Fetch[2] = SamplePx(ivec2(SamplingFragment) + Cross[2]);
+    Fetch[3] = SamplePx(ivec2(SamplingFragment) + Cross[3]);
 
     // Interpolate first based on x position
     float Interp1 = mix(Fetch[0], Fetch[1], float(f.x));
@@ -52,13 +52,36 @@ float Bilinear(vec2 SampleUV)
     return mix(Interp1, Interp2, float(f.y));
 }
 
+float GetHeightAt(vec3 W) {
+    vec2 UV = fract(((u_Range + W.xz) / u_Range) * 0.5f);
+    return Sample(UV);
+}
+
+float GetHeightAtSmooth(vec3 W) {
+    vec2 UV = fract(((u_Range + W.xz) / u_Range) * 0.5f);
+    return Bilinear(UV);
+}
+
+vec3 SampleNormals(vec3 WorldPosition) {
+
+    float Width = (u_Range / float(u_Res));
+
+    vec3 WestVertex = WorldPosition + vec3(Width, 0.0f, 0.0f);
+    WestVertex.y = GetHeightAtSmooth(WestVertex);
+
+    vec3 NorthVertex = WorldPosition + vec3(0.0f, 0.0f, Width);
+    NorthVertex.y = GetHeightAtSmooth(NorthVertex);
+
+    return normalize(cross(WorldPosition - NorthVertex, WorldPosition - WestVertex));
+}
+
 
 void main() {
 	
 	vec2 UV = fract(((u_Range + v_WorldPos.xz) / u_Range) * 0.5f);
 
     float HeightAt = clamp(Bilinear(UV), 0., 1.);
-    HeightAt = pow(HeightAt, 128.0f);
+    //HeightAt = pow(HeightAt, 128.0f);
 
     // Idea : Find vertex normals via screenspace derivatives 
     // Create an orthonormal basis? (TBN), orient High freequency normals to it! 
@@ -72,6 +95,6 @@ void main() {
 
     Color *= mix(0.1f, 1.0f, clamp(v_WorldPos.y / 3., 0., 1.));
 
-	o_Color = vec4(N,1.,1.0f);
+	o_Color = vec4(SampleNormals(vec3(v_WorldPos.x, HeightAt, v_WorldPos.z)),1.0f);
 
 }
