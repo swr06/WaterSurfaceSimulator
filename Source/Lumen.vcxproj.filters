@@ -283,7 +283,10 @@
     <None Include="Core\Shaders\RenderVertex.glsl">
       <Filter>Source Files\Simulation\Shaders</Filter>
     </None>
-    <None Include="Core\Shaders\RenderSpheres.glsl">
+    <None Include="Core\Shaders\RaytraceScene.glsl">
+      <Filter>Source Files\Simulation\Shaders</Filter>
+    </None>
+    <None Include="Core\Shaders\Post.glsl">
       <Filter>Source Files\Simulation\Shaders</Filter>
     </None>
   </ItemGroup>

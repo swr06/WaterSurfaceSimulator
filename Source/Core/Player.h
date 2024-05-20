@@ -20,7 +20,7 @@ namespace Simulation
 		FPSCamera Camera;
 		bool Freefly = false;
 		float Sensitivity = 0.25;
-		float Speed = 0.1250f;
+		float Speed = 0.5f;
 
 		glm::vec3 m_Position;
 		glm::vec3 m_Velocity;

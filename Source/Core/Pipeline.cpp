@@ -46,7 +46,12 @@ namespace Simulation {
 	float DebugVar = 0.0f;
 
 	int Resolution = 256;
+
+	float MouseRippleSize = 0.015f;
+
 	float Range = 4.0f;
+	float PoolRange = 4.0f;
+	float PoolHeight = 2.0f;
 	float ColumnWidth = (2.0f * Range) / float(Resolution);
 
 	float AlphaO = 0.4f;
@@ -66,6 +71,9 @@ namespace Simulation {
 	float DampingCoeff = 0.25f;
 
 	bool RenderSpheres = true;
+	bool RenderPool = true;
+
+	float WaterBlueness = 1.75f;
 
 	bool DoContainerCollisions = false;
 	bool DoSSCollisions = true;
@@ -195,17 +203,38 @@ namespace Simulation {
 				ImGui::Text("Camera Position : %f,  %f,  %f", Camera.GetPosition().x, Camera.GetPosition().y, Camera.GetPosition().z);
 				ImGui::Text("Camera Front : %f,  %f,  %f", Camera.GetFront().x, Camera.GetFront().y, Camera.GetFront().z);
 				ImGui::Text("Time : %f s", glfwGetTime());
+				ImGui::SliderFloat("Speed", &MainPlayer.Speed, 0.01f, 5.0f);
+
+				if (ImGui::Button("Reset Speed")) {
+					MainPlayer.Speed = 0.5f;
+				}
 
 				ImGui::NewLine();
+				ImGui::SliderFloat("Water Blueness", &WaterBlueness, 0.01f, 6.0f);
+				ImGui::NewLine();
+				ImGui::SliderFloat("Range of water volume", &Range, 0.1f, 32.0f);
+				ImGui::SliderFloat("Range of Pool", &PoolRange, 0.1f, Range);
+				ImGui::SliderFloat("Height of Pool", &PoolHeight, 0.1f, 32.0f);
+				if (ImGui::Button("Snap Pool")) {
+					PoolRange = Range;
+				}
+				ImGui::NewLine();
+
+				ImGui::Checkbox("Render Spheres", &RenderSpheres);
+				ImGui::Checkbox("Render Pool", &RenderPool);
+
+				ImGui::NewLine();
+
 				ImGui::Checkbox("Do Sim", &DoSim);
 				ImGui::Checkbox("Do Sphere-Sphere Collisions", &DoSSCollisions);
 				ImGui::Checkbox("Do Sphere-Container Collisions", &DoContainerCollisions);
-				ImGui::Checkbox("Render Spheres", &RenderSpheres);
 
 				PhysicsStep = ImGui::Button("Step Simulation");
 
+				ImGui::NewLine();
+				ImGui::SliderFloat("Mouse Ripple Size", &MouseRippleSize, 0.0f, 0.08f);
+				ImGui::NewLine();
 				ImGui::SliderInt("Substeps", &Substeps, 1, 100);
-				ImGui::SliderFloat("Range of water volume", &Range, 0.1f, 32.0f);
 				ImGui::SliderFloat("c", &c, 0.0f, 24.0f);
 				ImGui::SliderFloat("s", &s, 0.1f, 10.0f);
 				ImGui::SliderFloat("Sphere Friction Coeff", &SphereFrictionCoefficient, 0.0f, 1.0f);
@@ -220,7 +249,7 @@ namespace Simulation {
 					Heightmap[int(RandomGen.Float() * Resolution * Resolution)] = 0.5f;
 				}
 
-				if (ImGui::Button("Reset")) {
+				if (ImGui::Button("Reset Water Sim")) {
 
 					for (int i = 0; i < Resolution * Resolution; i++) {
 						Heightmap[i] = 1.f;
@@ -285,7 +314,6 @@ namespace Simulation {
 
 			if (e.type == Simulation::EventTypes::MousePress && !ImGui::GetIO().WantCaptureMouse && GetCurrentFrame() > 32)
 			{
-
 			}
 
 			if (e.type == Simulation::EventTypes::MouseMove && GetCursorLocked())
@@ -709,6 +737,8 @@ namespace Simulation {
 		   "Res/Sky/back.bmp"
 			});
 
+		GLClasses::Texture PoolTexture;
+		PoolTexture.CreateTexture("Res/pool.jpg",false, false, false, GL_TEXTURE_2D, GL_LINEAR, GL_LINEAR);
 
 		RandomGen.Float();
 
@@ -788,15 +818,22 @@ namespace Simulation {
 		// Shaders
 		GLClasses::Shader& BlitShader = ShaderManager::GetShader("BLIT");
 		GLClasses::Shader& BasicRender = ShaderManager::GetShader("BASICRENDER");
-		GLClasses::Shader& RTSphere = ShaderManager::GetShader("SPHERE");
-
-		GLClasses::Framebuffer GBuffer[2] = { GLClasses::Framebuffer(16, 16, {{GL_RGBA16F, GL_RGBA, GL_FLOAT, false, false},  {GL_RGBA16F, GL_RGBA, GL_FLOAT, false, false}}, true, true), GLClasses::Framebuffer(16, 16, {{GL_RGBA16F, GL_RGBA, GL_FLOAT, false, false}, {GL_RGBA16F, GL_RGBA, GL_FLOAT, false, false}}, true, true) };
+		GLClasses::Shader& RaytracingShader = ShaderManager::GetShader("RTSHADER");
+		GLClasses::Shader& PostShader = ShaderManager::GetShader("POST");
+		
+		GLClasses::Framebuffer GBuffer[2] = { GLClasses::Framebuffer(16, 16, {{GL_RGBA16F, GL_RGBA, GL_FLOAT, false, false}}, true, true), GLClasses::Framebuffer(16, 16, {{GL_RGBA16F, GL_RGBA, GL_FLOAT, false, false}}, true, true) };
 
 		// Spheres
 		GLuint SphereSSBO = 0;
 		glGenBuffers(1, &SphereSSBO);
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, SphereSSBO);
 		glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(RenderSphere) * MAX_SPHERES, (void*)0, GL_DYNAMIC_DRAW);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+		GLuint FocusSSBO = 0;
+		glGenBuffers(1, &FocusSSBO);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, FocusSSBO);
+		glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(glm::vec4) * 1, (void*)0, GL_DYNAMIC_DRAW);
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
 		// Create Heightmaps
@@ -840,20 +877,31 @@ namespace Simulation {
 
 		while (!glfwWindowShouldClose(app.GetWindow())) {
 
+			// Update 
+			glDisable(GL_CULL_FACE);
+
 			CheckerStep = app.GetCurrentFrame() % 2;
 			kProportionality = (c * c) / (s * s);
 			ColumnWidth = (2.0f * Range) / float(Resolution);
-
-			glDisable(GL_CULL_FACE);
-
 			app.OnUpdate();
+
+			// Mouse Ripple Update
+			glm::vec4 FocusedUV;
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, FocusSSBO);
+			glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::vec4), &FocusedUV);;
+			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
+
+			if (glfwGetMouseButton(app.GetWindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS && app.GetCurrentFrame() > 100) {
+				glm::ivec2 px = glm::ivec2(glm::floor(glm::vec2(FocusedUV.x, FocusedUV.y) * glm::vec2(Resolution)));
+				Heightmap[To1DIdxSafe(px.x, px.y)] += MouseRippleSize;
+			}
 
 			// FBO Update
 			GBuffer[0].SetSize(app.GetWidth(), app.GetHeight());
 			GBuffer[1].SetSize(app.GetWidth(), app.GetHeight());
 
 			// Player
-			MainPlayer.OnUpdate(app.GetWindow(), DeltaTime, 0.5f, app.GetCurrentFrame());
+			MainPlayer.OnUpdate(app.GetWindow(), DeltaTime, MainPlayer.Speed, app.GetCurrentFrame());
 
 			// SIMULATE
 			if (DoSim || PhysicsStep)
@@ -912,22 +960,50 @@ namespace Simulation {
 			// Sphere
 
 			GBuffer[1].Bind();
-			RTSphere.Use();
+			RaytracingShader.Use();
 
-			RTSphere.SetInteger("u_Texture", 0);
-			RTSphere.SetInteger("u_Depth", 1);
-			RTSphere.SetInteger("u_Skybox", 2);
+			RaytracingShader.SetInteger("u_Texture", 0);
+			RaytracingShader.SetInteger("u_Depth", 1);
+			RaytracingShader.SetInteger("u_Skybox", 2);
+			RaytracingShader.SetInteger("u_PoolTexture", 3);
 			
-			RTSphere.SetInteger("u_Spheres", Spheres.size());
-			RTSphere.SetBool("u_RenderSpheres", RenderSpheres);
+			RaytracingShader.SetInteger("u_Spheres", Spheres.size());
+			RaytracingShader.SetBool("u_RenderSpheres", RenderSpheres);
+			RaytracingShader.SetBool("u_RenderPool", RenderPool);
 
-			RTSphere.SetFloat("u_zNear", Camera.GetNearPlane());
-			RTSphere.SetFloat("u_zFar", Camera.GetFarPlane());
-			RTSphere.SetMatrix4("u_InverseProjection", glm::inverse(Camera.GetProjectionMatrix()));
-			RTSphere.SetMatrix4("u_InverseView", glm::inverse(Camera.GetViewMatrix()));
+			RaytracingShader.SetFloat("u_zNear", Camera.GetNearPlane());
+			RaytracingShader.SetFloat("u_zFar", Camera.GetFarPlane());
 
+			RaytracingShader.SetFloat("u_PoolRange", PoolRange);
+			RaytracingShader.SetFloat("u_PoolHeight", PoolHeight);
+			RaytracingShader.SetFloat("u_Range", Range);
+
+			RaytracingShader.SetFloat("u_WaterBlueness", WaterBlueness);
+
+			RaytracingShader.SetMatrix4("u_InverseProjection", glm::inverse(Camera.GetProjectionMatrix()));
+			RaytracingShader.SetMatrix4("u_InverseView", glm::inverse(Camera.GetViewMatrix()));
+
+			RaytracingShader.SetInteger("u_ScreenResH", app.GetHeight());
+			RaytracingShader.SetInteger("u_ScreenResW", app.GetWidth());
+
+			if (app.GetCursorLocked()) {
+				RaytracingShader.SetInteger("u_MouseY", app.GetHeight() / 2);
+				RaytracingShader.SetInteger("u_MouseX", app.GetWidth() / 2);
+			}
+
+			else {
+				double mxx, myy;
+				glfwGetCursorPos(app.GetWindow(), &mxx, &myy);
+				myy = (double)app.GetHeight() - myy;
+				glm::ivec2 fp = glm::vec2((float)mxx, (float)myy);
+
+				RaytracingShader.SetInteger("u_MouseY", fp.y);
+				RaytracingShader.SetInteger("u_MouseX", fp.x);
+			}
+			
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, SphereSSBO);
-
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, FocusSSBO);
+			
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, GBuffer[0].GetTexture());
 
@@ -937,6 +1013,9 @@ namespace Simulation {
 			glActiveTexture(GL_TEXTURE2);
 			glBindTexture(GL_TEXTURE_CUBE_MAP, Skybox.GetID());
 
+			glActiveTexture(GL_TEXTURE3);
+			glBindTexture(GL_TEXTURE_2D, PoolTexture.GetTextureID());
+			
 			ScreenQuadVAO.Bind();
 			glDrawArrays(GL_TRIANGLES, 0, 6);
 			ScreenQuadVAO.Unbind();
@@ -948,9 +1027,9 @@ namespace Simulation {
 			glPolygonMode(GL_FRONT, GL_FILL);
 			glPolygonMode(GL_BACK, GL_FILL);
 
-			BlitShader.Use();
+			PostShader.Use();
 
-			BlitShader.SetInteger("u_Texture", 0);
+			PostShader.SetInteger("u_Texture", 0);
 
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, GBuffer[1].GetTexture());
