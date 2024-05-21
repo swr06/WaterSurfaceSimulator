@@ -10,6 +10,8 @@ uniform sampler2D u_Texture;
 uniform float u_Range;
 uniform int u_Res;
 
+uniform vec3 u_SunDirection;
+
 layout (std430, binding = 0) buffer SSBO_HM {
 	float Heightmap[];
 };
@@ -26,6 +28,10 @@ float Sample(vec2 UV) {
 
 float SamplePx(ivec2 px) {
 	return Heightmap[To1DIdx(px.x, px.y)];
+}
+
+vec2 SpiralPoint(float angle, float scale) {
+    return vec2(sin(angle), cos(angle)) * pow(angle / scale, 1.0 / (sqrt(5.0) * 0.5 + 0.5));
 }
 
 float Bilinear(vec2 SampleUV)
@@ -76,25 +82,15 @@ vec3 SampleNormals(vec3 WorldPosition) {
 }
 
 
+
 void main() {
 	
 	vec2 UV = fract(((u_Range + v_WorldPos.xz) / u_Range) * 0.5f);
 
     float HeightAt = clamp(Bilinear(UV), 0., 1.);
-    //HeightAt = pow(HeightAt, 128.0f);
 
-    // Idea : Find vertex normals via screenspace derivatives 
-    // Create an orthonormal basis? (TBN), orient High freequency normals to it! 
-    vec3 DeltaX = vec3(dFdxFine(v_WorldPos.x), dFdxFine(v_WorldPos.y), dFdxFine(v_WorldPos.z));    
-    vec3 DeltaY = vec3(dFdyFine(v_WorldPos.x), dFdyFine(v_WorldPos.y), dFdyFine(v_WorldPos.z));
-    vec3 VertexNormal = normalize(cross(DeltaX,DeltaY)); 
-
-    vec2 N = vec2(dFdxFine(HeightAt), dFdyFine(HeightAt)) * 0.5f + 0.5f;
-
-    vec3 Color = vec3(1.);// vec3(0, 117, 119) / 255.;
-
-    Color *= mix(0.1f, 1.0f, clamp(v_WorldPos.y / 3., 0., 1.));
-
-	o_Color = vec4(SampleNormals(vec3(v_WorldPos.x, HeightAt, v_WorldPos.z)),1.0f);
+    vec3 Normals = SampleNormals(vec3(v_WorldPos.x, HeightAt, v_WorldPos.z));
+    
+    o_Color = vec4(Normals,1.);
 
 }

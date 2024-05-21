@@ -16,6 +16,7 @@ uniform float u_PoolRange;
 uniform float u_PoolHeight;
 
 uniform float u_Range;
+uniform int u_Res;
 
 uniform int u_Spheres;
 
@@ -30,6 +31,8 @@ uniform int u_ScreenResH;
 uniform int u_MouseX;
 uniform int u_MouseY;
 
+uniform vec3 u_SunDirection;
+
 uniform float u_WaterBlueness;
 
 layout (std430, binding = 0) buffer SSBO_Spheres {
@@ -39,6 +42,12 @@ layout (std430, binding = 0) buffer SSBO_Spheres {
 layout (std430, binding = 1) buffer SSBO_CenterPx {
 	vec4 CenterPxPacked;
 };
+
+
+layout (std430, binding = 2) buffer SSBO_HM {
+	float Heightmap[];
+};
+
 
 vec3 SkyColour(vec3 ray)
 {
@@ -60,6 +69,104 @@ float LinearizeDepth(float depth)
 vec3 SampleSkyAt(vec3 D) {
     return pow(texture(u_Skybox, D).xyz, vec3(1.4f));
 }
+
+
+int To1DIdx(int x, int y) {
+	return (y * u_Res) + x;
+}
+
+float Sample(vec2 UV) {
+	UV = clamp(UV, 0., 1.);
+	ivec2 Texel = ivec2(UV * vec2(float(u_Res)));
+	return Heightmap[To1DIdx(Texel.x, Texel.y)];
+}
+
+float SamplePx(ivec2 px) {
+	return Heightmap[To1DIdx(px.x, px.y)];
+}
+
+vec2 SpiralPoint(float angle, float scale) {
+    return vec2(sin(angle), cos(angle)) * pow(angle / scale, 1.0 / (sqrt(5.0) * 0.5 + 0.5));
+}
+
+float Bilinear(vec2 SampleUV)
+{
+    const ivec2 Cross[4] = ivec2[4](ivec2(0, 0), ivec2(1, 0), ivec2(0, 1), ivec2(1, 1));
+
+    // Relative to center
+    vec2 SamplingFragment = (SampleUV * vec2(u_Res)) - vec2(0.5f); 
+
+    // Find how much you need to interpolate across both axis
+    vec2 f = fract(SamplingFragment);
+
+    // Fetch 4 neighbours
+    float Fetch[4];
+    Fetch[0] = SamplePx(ivec2(SamplingFragment) + Cross[0]);
+    Fetch[1] = SamplePx(ivec2(SamplingFragment) + Cross[1]);
+    Fetch[2] = SamplePx(ivec2(SamplingFragment) + Cross[2]);
+    Fetch[3] = SamplePx(ivec2(SamplingFragment) + Cross[3]);
+
+    // Interpolate first based on x position
+    float Interp1 = mix(Fetch[0], Fetch[1], float(f.x));
+    float Interp2 = mix(Fetch[2], Fetch[3], float(f.x));
+
+    return mix(Interp1, Interp2, float(f.y));
+}
+
+float GetHeightAt(vec3 W) {
+    vec2 UV = fract(((u_Range + W.xz) / u_Range) * 0.5f);
+    return Sample(UV);
+}
+
+float GetHeightAtSmooth(vec3 W) {
+    vec2 UV = fract(((u_Range + W.xz) / u_Range) * 0.5f);
+    return Bilinear(UV);
+}
+
+vec3 SampleNormals(vec3 WorldPosition) {
+
+    float Width = (u_Range / float(u_Res));
+
+    vec3 WestVertex = WorldPosition + vec3(Width, 0.0f, 0.0f);
+    WestVertex.y = GetHeightAtSmooth(WestVertex);
+
+    vec3 NorthVertex = WorldPosition + vec3(0.0f, 0.0f, Width);
+    NorthVertex.y = GetHeightAtSmooth(NorthVertex);
+    return normalize(cross(WorldPosition - NorthVertex, WorldPosition - WestVertex));
+}
+
+float CalculateCausticsNV(in vec3 worldPosition, in float depth) 
+{
+    const float PI = 3.14159f;
+    float samples = 16.0;
+    float focus = 0.9f;
+    float surfaceDistanceUp = depth * abs(u_SunDirection.y);
+
+    float filterRadius = 0.2;
+
+    float radius = filterRadius * depth;
+    float inverseDistanceThreshold = sqrt(samples / PI) * focus / radius;
+
+    vec3 flatRefractVector = refract(u_SunDirection, vec3(0, 1, 0), 1.00028/1.333);
+    vec3 flatRefract = flatRefractVector * surfaceDistanceUp / abs(flatRefractVector.y);
+    vec3 surfacePosition = worldPosition - flatRefract;
+
+    float finalCaustic = 0.0;
+
+    for(float i = 0; i <= samples; i++) 
+    {
+        vec3 samplePos = surfacePosition;
+        samplePos.xz += SpiralPoint(i + 0.5f, samples) * radius;
+        vec3 normal = normalize(SampleNormals(vec3(samplePos.x,1.,samplePos.z)).xyz);
+        vec3 refractVector = refract(u_SunDirection, normal, 1.00028/1.333);
+        samplePos = refractVector * (surfaceDistanceUp / abs(refractVector.y)) + samplePos;
+        finalCaustic += clamp(1.0 - distance(worldPosition, samplePos) * inverseDistanceThreshold,0.,1.);
+    }
+
+    finalCaustic *= focus * focus;
+    return pow(finalCaustic, 1.0);
+}
+
 
 // Based on the blog post by inigo quilez 
 vec2 IntersectBox(in vec3 ro, in vec3 invrd, in vec3 rad, out vec3 oN) 
@@ -206,20 +313,12 @@ vec4 IntersectPool(in vec3 o, in vec3 inv_d) {
     return Int ? vec4(MaxDist, Nf) : vec4(-1.);
 }
 
-vec3 GetPoolShading(in vec3 o, in vec3 dir, in vec3 invdir) {
-    vec4 pool = IntersectPool(o, invdir);
-
-    if (pool.x > 0.0f) {
-        vec2 Uv = GetBoxUV(o + dir * pool.x, pool.yzw);
-        return SmoothFilter(u_PoolTexture, Uv.xy).xyz;
-    }
-
-    return vec3(0.);
-}
-
 vec3 GetPoolShading(in vec3 wp, in vec3 n) {
     vec2 Uv = GetBoxUV(wp, n);
-    return SmoothFilter(u_PoolTexture, Uv.xy).xyz;
+    //float Caustic = n == vec3(0.,1.,0.) ? CalculateCausticsNV(wp, 4.0f) : 1.;
+    float Caustic = 1.0f;
+    vec3 Albedo = SmoothFilter(u_PoolTexture, Uv.xy).xyz;
+    return Albedo * Caustic;
 }
 
 vec4 GetRayShading(in vec3 o, in vec3 dir, in vec3 invdir) {
@@ -322,7 +421,6 @@ void GetPrimaryRayShading(in vec3 o, in vec3 dir, in vec3 invdir, inout float pr
     }
 }
 
-
 void main() {
 
 	vec3 RayOrigin = u_InverseView[3].xyz;
@@ -362,4 +460,7 @@ void main() {
     GetPrimaryRayShading(RayOrigin, RayDirection, InvDir, Dist, NormalsSampled, WorldPos, Color);
 
     o_Color = vec4(Color, 1.);
+
+    //if (!NonWaterPx)
+    //     o_Color = vec4(CalculateCausticsNV(WorldPos.xyz, 4.0f).xxx, 1.);
 }

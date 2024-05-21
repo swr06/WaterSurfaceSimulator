@@ -80,6 +80,8 @@ namespace Simulation {
 	
 	bool PhysicsStep = false;
 
+	glm::vec3 SunDirection;
+
 	int CheckerStep = 0; // Global variable that oscillates b/w 0 and 1
 
 	float* Heightmap;
@@ -208,7 +210,8 @@ namespace Simulation {
 				if (ImGui::Button("Reset Speed")) {
 					MainPlayer.Speed = 0.5f;
 				}
-
+				ImGui::NewLine();
+				ImGui::SliderFloat3("Sun direction", &SunDirection[0], -1.f, 1.f);
 				ImGui::NewLine();
 				ImGui::SliderFloat("Water Blueness", &WaterBlueness, 0.01f, 6.0f);
 				ImGui::NewLine();
@@ -944,6 +947,7 @@ namespace Simulation {
 			BasicRender.SetFloat("u_RangeV", Range);
 			BasicRender.SetInteger("u_Res", Resolution);
 			BasicRender.SetInteger("u_ResV", Resolution);
+			BasicRender.SetVector3f("u_SunDirection", SunDirection);
 
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, HeightmapSSBO);
 
@@ -977,6 +981,7 @@ namespace Simulation {
 			RaytracingShader.SetFloat("u_PoolRange", PoolRange);
 			RaytracingShader.SetFloat("u_PoolHeight", PoolHeight);
 			RaytracingShader.SetFloat("u_Range", Range);
+			RaytracingShader.SetInteger("u_Res", Resolution);
 
 			RaytracingShader.SetFloat("u_WaterBlueness", WaterBlueness);
 
@@ -985,6 +990,8 @@ namespace Simulation {
 
 			RaytracingShader.SetInteger("u_ScreenResH", app.GetHeight());
 			RaytracingShader.SetInteger("u_ScreenResW", app.GetWidth());
+
+			RaytracingShader.SetVector3f("u_SunDirection", SunDirection);
 
 			if (app.GetCursorLocked()) {
 				RaytracingShader.SetInteger("u_MouseY", app.GetHeight() / 2);
@@ -1003,7 +1010,8 @@ namespace Simulation {
 			
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, SphereSSBO);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, FocusSSBO);
-			
+			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 2, HeightmapSSBO);
+
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, GBuffer[0].GetTexture());
 
