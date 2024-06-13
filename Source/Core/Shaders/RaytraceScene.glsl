@@ -49,6 +49,10 @@ layout (std430, binding = 2) buffer SSBO_HM {
 };
 
 
+// Lighting
+const vec3 FakeLightDir = normalize(vec3(0.3f, 1.0f, 0.2f));
+const vec3 IndirectLighting = vec3(16.0f, 32.0f, 200.0f) * 0.01f;
+
 vec3 SkyColour(vec3 ray)
 {
     return mix(vec3(0.7), vec3(0.0f), exp(-(ray.y + 0.1)));
@@ -228,7 +232,7 @@ vec3 WorldPosFromDepth(float depth, vec2 txc)
     return WorldPos.xyz;
 }
 
-float TraceSpheres(vec3 O, vec3 D) {
+float TraceSpheres(vec3 O, vec3 D, out vec3 N) {
 
     if (!u_RenderSpheres) {
         return -1.;
@@ -236,6 +240,7 @@ float TraceSpheres(vec3 O, vec3 D) {
 
     float Dist = 100000.;
     bool Int = false;
+    vec3 C = vec3(0.);
 
     for (int i = 0 ; i < u_Spheres ; i ++) {
            float T = TraceSphere(O - SphereData[i].xyz, D, SphereData[i].w);
@@ -243,9 +248,11 @@ float TraceSpheres(vec3 O, vec3 D) {
            if (T > 0.0f && T < Dist) {
                Dist = T;
                Int = true;
+               C = SphereData[i].xyz;
            }
        }
 
+    N = normalize((O + D * Dist) - C);
     return Int ? Dist : -1.;
 
 }
@@ -318,13 +325,18 @@ vec3 GetPoolShading(in vec3 wp, in vec3 n) {
     //float Caustic = n == vec3(0.,1.,0.) ? CalculateCausticsNV(wp, 4.0f) : 1.;
     float Caustic = 1.0f;
     vec3 Albedo = SmoothFilter(u_PoolTexture, Uv.xy).xyz;
-    return Albedo * Caustic;
+    return Albedo * Caustic ;
+}
+
+vec3 GetSphereShading(vec3 N) {
+    float Lambert = max(0.0f, dot(N, FakeLightDir));
+    return vec3(1.0f, 0.0f, 0.0f) * (vec3(Lambert) + IndirectLighting);
 }
 
 vec4 GetRayShading(in vec3 o, in vec3 dir, in vec3 invdir) {
     
-    
-    float SphereT = TraceSpheres(o, dir);
+    vec3 Ns = vec3(0.);
+    float SphereT = TraceSpheres(o, dir, Ns);
     vec4 Pool = IntersectPool(o, invdir);
 
     // both intersected 
@@ -338,7 +350,7 @@ vec4 GetRayShading(in vec3 o, in vec3 dir, in vec3 invdir) {
             }
 
             else {
-                return vec4(vec3(1.,0.,0.), SphereT);
+                return vec4( GetSphereShading(Ns), SphereT);
             }
         }
     }
@@ -350,7 +362,7 @@ vec4 GetRayShading(in vec3 o, in vec3 dir, in vec3 invdir) {
 
     // Only sphere 
     if (Pool.x < 0.0f && SphereT > 0.0f) {
-        return vec4(vec3(1.,0.,0.), SphereT);
+        return vec4(GetSphereShading(Ns), SphereT);
     }
 
     // None
@@ -372,7 +384,8 @@ vec3 GetPrimaryRayWater(in vec3 wp, in vec3 dir, in vec3 n) {
 
 void GetPrimaryRayShading(in vec3 o, in vec3 dir, in vec3 invdir, inout float primtraversal, in vec3 Normals, in vec3 WP, inout vec3 oColor) {
     
-    float SphereT = TraceSpheres(o, dir);
+    vec3 Ns = vec3(0.);
+    float SphereT = TraceSpheres(o, dir, Ns);
     vec4 Pool = IntersectPool(o, invdir);
     bool ShadeWater = true;
 
@@ -390,7 +403,7 @@ void GetPrimaryRayShading(in vec3 o, in vec3 dir, in vec3 invdir, inout float pr
             }
 
             else {
-                oColor = vec3(1.,0.,0.);
+                oColor = GetSphereShading(Ns);
                 primtraversal = SphereT;
             }
 
@@ -407,7 +420,7 @@ void GetPrimaryRayShading(in vec3 o, in vec3 dir, in vec3 invdir, inout float pr
 
     // Only sphere 
     else if (Pool.x < 0.0f && SphereT > 0.0f && SphereT < WorldTraversal) {
-        oColor = vec3(1.,0.,0.);
+        oColor = GetSphereShading(Ns);
         primtraversal = SphereT;
         ShadeWater = false;
     }
