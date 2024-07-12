@@ -654,7 +654,7 @@ namespace Simulation {
 				float Length = glm::length(DeltaP);
 
 				// DESPAWN IF TOO FAR
-				float Threshold = std::max(8.0f * Range, Height * 3.0f);
+				float Threshold = std::max(8.0f * Range, Height * 4.0f);
 				if (Length > Threshold || (DestroySpheresAfterTime && (e.Life > (SphereDestroyTime+0.1)))) {
 					Spheres.erase(Spheres.begin() + i);
 				}
