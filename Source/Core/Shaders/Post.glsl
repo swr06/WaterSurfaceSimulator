@@ -6,6 +6,8 @@ in vec2 v_TexCoords;
 
 uniform sampler2D u_Texture;
 
+uniform float u_Exposure;
+
 // ACES Tonemap operator 
 mat3 ACESInputMat = mat3(
     0.59719, 0.07600, 0.02840,
@@ -44,7 +46,7 @@ vec3 ToSRGB(vec3 x) {
 
 void main() {
 
-    float Exposure = 2.4f;
+    float Exposure = u_Exposure;
 	o_Color.xyz = (ACESFitted(texture(u_Texture, v_TexCoords).xyz * Exposure));
     o_Color.w = 1.;
 

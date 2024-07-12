@@ -37,6 +37,7 @@ namespace Simulation {
 		glm::vec2(0.039766, -0.396100), glm::vec2(0.034211, 0.979980)
 	};
 
+	float Exposure = 1.8f;
 
 	// kg/m^3
 	const float RhoWater = 998.2f;
@@ -97,6 +98,11 @@ namespace Simulation {
 	Random RandomGen;
 
 	typedef glm::vec3 Force;
+
+	bool IsMouseOverAnyImGuiWindow() {
+		ImGuiIO& io = ImGui::GetIO();
+		return io.WantCaptureMouse;
+	}
 
 	inline int To1DIdx(int x, int y) {
 		return (y * Resolution) + x;
@@ -230,6 +236,7 @@ namespace Simulation {
 
 				ImGui::Text("Camera Position : %f,  %f,  %f", Camera.GetPosition().x, Camera.GetPosition().y, Camera.GetPosition().z);
 				ImGui::Text("Camera Front : %f,  %f,  %f", Camera.GetFront().x, Camera.GetFront().y, Camera.GetFront().z);
+				ImGui::SliderFloat("Camera Exposure", &Exposure, 0.1f, 4.0f);
 				ImGui::Text("Time : %f s", glfwGetTime());
 				ImGui::SliderFloat("Speed", &MainPlayer.Speed, 0.01f, 5.0f);
 
@@ -409,6 +416,18 @@ namespace Simulation {
 				s1.Life = 0.;
 				s1.Color = GetNiceColor();
 				Spheres.push_back(s1);
+			}
+
+			if (e.type == Simulation::EventTypes::KeyPress && e.key == GLFW_KEY_R && GetCurrentFrame()>16) {
+				for (int i = 0; i < Resolution * Resolution; i++) {
+					Heightmap[i] = 1.f;
+				}
+
+				memset(WaterAccelerations, 0, Resolution * Resolution * sizeof(float));
+				memset(WaterVelocities, 0, Resolution * Resolution * sizeof(float));
+				memset(ObjectHeights[0], 0, Resolution * Resolution * sizeof(float));
+				memset(ObjectHeights[1], 0, Resolution * Resolution * sizeof(float));
+				Spheres.clear();
 			}
 
 
@@ -781,6 +800,21 @@ namespace Simulation {
 		// Application
 		RayTracerApp app;
 		app.Initialize();
+
+		std::cout << "\n\n--------------------\n\n";
+
+		int q = 0;
+		int ResolutionModes[5] = { 64, 128, 256, 384, 512 };
+
+		std::cout << "Enter the quality of the simulation grid (Between 1 -> 5, 3 is recommended) : ";
+		std::cin >> q;
+
+		q = glm::clamp(q, 1, 5);
+		q--;
+
+		Resolution = ResolutionModes[q];
+		Resolution = glm::clamp(Resolution, 64, 1024);
+
 		app.SetCursorLocked(false);
 
 		// Create VBO and VAO for drawing the screen-sized quad.
@@ -957,7 +991,8 @@ namespace Simulation {
 			glGetBufferSubData(GL_SHADER_STORAGE_BUFFER, 0, sizeof(glm::vec4), &FocusedUV);;
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
-			if (glfwGetMouseButton(app.GetWindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS && app.GetCurrentFrame() > 100) {
+			if (!IsMouseOverAnyImGuiWindow() && glfwGetMouseButton(app.GetWindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS && app.GetCurrentFrame() > 100) {
+				
 				glm::ivec2 px = glm::ivec2(glm::floor(glm::vec2(FocusedUV.x, FocusedUV.y) * glm::vec2(Resolution)));
 				Heightmap[To1DIdxSafe(px.x, px.y)] += MouseRippleSize;
 			}
@@ -1111,6 +1146,7 @@ namespace Simulation {
 			PostShader.Use();
 
 			PostShader.SetInteger("u_Texture", 0);
+			PostShader.SetFloat("u_Exposure", Exposure);
 
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, GBuffer[1].GetTexture());
