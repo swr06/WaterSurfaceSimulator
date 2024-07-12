@@ -73,6 +73,8 @@ namespace Simulation
 			return static_cast<float>(y);
 		}
 
+		void SetDoDebugCallback(bool b);
+
 	protected:
 		GLFWwindow* m_Window;
 		unsigned int m_Width = 800;

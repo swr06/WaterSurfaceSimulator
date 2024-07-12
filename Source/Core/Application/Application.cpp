@@ -8,6 +8,8 @@ bool VoxelRT_keyboard_enabled;
 
 namespace Simulation
 {
+	static bool DoDebugCallback = true;
+
 	// Event callbacks
 	void KeyCallback(GLFWwindow* window, int key, int scancode, int action, int mods);
 	void MouseCallback(GLFWwindow* window, int button, int action, int mods);
@@ -22,6 +24,10 @@ namespace Simulation
 		GLenum severity, GLsizei length,
 		const GLchar* msg, const void* data)
 	{
+		if (!DoDebugCallback) {
+			return;
+		}
+
 		char* _source;
 		char* _type;
 		char* _severity;
@@ -294,6 +300,11 @@ namespace Simulation
 		}
 
 		m_CurrentFrame += 1;
+	}
+
+	void Application::SetDoDebugCallback(bool b)
+	{
+		DoDebugCallback = b;
 	}
 
 	/*

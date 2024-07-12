@@ -1,5 +1,14 @@
 #version 450 core 
 
+#define bayer4(a)   (bayer2(  0.5 * (a)) * 0.25 + bayer2(a))
+#define bayer8(a)   (bayer4(  0.5 * (a)) * 0.25 + bayer2(a))
+#define bayer16(a)  (bayer8(  0.5 * (a)) * 0.25 + bayer2(a))
+#define bayer32(a)  (bayer16( 0.5 * (a)) * 0.25 + bayer2(a))
+#define bayer64(a)  (bayer32( 0.5 * (a)) * 0.25 + bayer2(a))
+#define bayer128(a) (bayer64( 0.5 * (a)) * 0.25 + bayer2(a))
+#define bayer256(a) (bayer128(0.5 * (a)) * 0.25 + bayer2(a))
+
+
 layout (location = 0) out vec4 o_Color;
 
 in vec2 v_TexCoords;
@@ -33,10 +42,18 @@ uniform int u_MouseY;
 
 uniform vec3 u_SunDirection;
 
+uniform bool u_DestroySpheresAfterTime;
+uniform float u_DestroyTime;
+
 uniform float u_WaterBlueness;
 
+struct RenderSphere {
+    vec4 Data0;
+    vec4 Data1;
+};
+
 layout (std430, binding = 0) buffer SSBO_Spheres {
-	vec4 SphereData[];
+	RenderSphere SphereData[];
 };
 
 layout (std430, binding = 1) buffer SSBO_CenterPx {
@@ -48,6 +65,18 @@ layout (std430, binding = 2) buffer SSBO_HM {
 	float Heightmap[];
 };
 
+// RNG 
+float HASH2SEED = 0.0f;
+vec2 hash2() 
+{
+	return fract(sin(vec2(HASH2SEED += 0.1, HASH2SEED += 0.1)) * vec2(43758.5453123, 22578.1459123));
+}
+
+// Bayer matrix dither 
+float bayer2(vec2 a){
+    a = floor(a);
+    return fract(dot(a, vec2(0.5, a.y * 0.75)));
+}
 
 // Lighting
 const vec3 FakeLightDir = normalize(vec3(0.3f, 1.0f, 0.2f));
@@ -232,23 +261,37 @@ vec3 WorldPosFromDepth(float depth, vec2 txc)
     return WorldPos.xyz;
 }
 
-float TraceSpheres(vec3 O, vec3 D, out vec3 N) {
+float TraceSpheres(vec3 O, vec3 D, out vec3 N,out vec3 Col) {
 
     if (!u_RenderSpheres) {
         return -1.;
     }
+
+    int PixelSum = int(gl_FragCoord.x) + int(gl_FragCoord.y) + int(16.*bayer256(gl_FragCoord.xy));
+    float Hash = bayer256(gl_FragCoord.xy).x;
 
     float Dist = 100000.;
     bool Int = false;
     vec3 C = vec3(0.);
 
     for (int i = 0 ; i < u_Spheres ; i ++) {
-           float T = TraceSphere(O - SphereData[i].xyz, D, SphereData[i].w);
+           float T = TraceSphere(O - SphereData[i].Data0.xyz, D, SphereData[i].Data0.w);
    
+           if (u_DestroySpheresAfterTime) {            
+                float TimeElapsed = SphereData[i].Data1.w;
+                float Transparency = clamp(u_DestroyTime-TimeElapsed,0.,1.);
+                Transparency*=Transparency;
+                // float Hash = hash2().x;
+                if (Hash > Transparency) {
+                     continue;
+                }
+           }
+
            if (T > 0.0f && T < Dist) {
                Dist = T;
                Int = true;
-               C = SphereData[i].xyz;
+               C = SphereData[i].Data0.xyz;
+               Col = SphereData[i].Data1.xyz;
            }
        }
 
@@ -299,7 +342,7 @@ vec4 IntersectPool(in vec3 o, in vec3 inv_d) {
 
     const vec3 BoxPositions[5] = vec3[]( vec3(0.,-0.,Size + Bias), vec3(0.,-0.,-Size - Bias), vec3(Size + Bias,-0.,0.),
                                    vec3(-Size - Bias,-0.,0.), vec3(0.,-Height,0.) ); 
-    const vec3 BoxRanges[5] = vec3[]( vec3(Size, Height, Thickness), vec3(Size, Height, Thickness), vec3(Thickness, Height, Size), vec3(Thickness, Height, Size), vec3(Size, Thickness, Size) );
+    const vec3 BoxRanges[5] = vec3[]( vec3(Size, Height+0.55f, Thickness), vec3(Size, Height+0.55f, Thickness), vec3(Thickness, Height+0.55f, Size), vec3(Thickness, Height+0.55f, Size), vec3(Size + 0.04f, 0.54f, Size+ 0.04f) );
 
     float MaxDist = 100000.0f;
     vec2 intersect = vec2(-1.);
@@ -328,15 +371,16 @@ vec3 GetPoolShading(in vec3 wp, in vec3 n) {
     return Albedo * Caustic ;
 }
 
-vec3 GetSphereShading(vec3 N) {
+vec3 GetSphereShading(vec3 N, vec3 SC) {
     float Lambert = max(0.0f, dot(N, FakeLightDir));
-    return vec3(1.0f, 0.0f, 0.0f) * (vec3(Lambert) + IndirectLighting);
+    return SC * (vec3(Lambert) + IndirectLighting);
 }
 
 vec4 GetRayShading(in vec3 o, in vec3 dir, in vec3 invdir) {
     
     vec3 Ns = vec3(0.);
-    float SphereT = TraceSpheres(o, dir, Ns);
+    vec3 sCol=vec3(1.,0.,0.);
+    float SphereT = TraceSpheres(o, dir, Ns,sCol);
     vec4 Pool = IntersectPool(o, invdir);
 
     // both intersected 
@@ -350,7 +394,7 @@ vec4 GetRayShading(in vec3 o, in vec3 dir, in vec3 invdir) {
             }
 
             else {
-                return vec4( GetSphereShading(Ns), SphereT);
+                return vec4( GetSphereShading(Ns,sCol), SphereT);
             }
         }
     }
@@ -362,7 +406,7 @@ vec4 GetRayShading(in vec3 o, in vec3 dir, in vec3 invdir) {
 
     // Only sphere 
     if (Pool.x < 0.0f && SphereT > 0.0f) {
-        return vec4(GetSphereShading(Ns), SphereT);
+        return vec4(GetSphereShading(Ns,sCol), SphereT);
     }
 
     // None
@@ -385,7 +429,8 @@ vec3 GetPrimaryRayWater(in vec3 wp, in vec3 dir, in vec3 n) {
 void GetPrimaryRayShading(in vec3 o, in vec3 dir, in vec3 invdir, inout float primtraversal, in vec3 Normals, in vec3 WP, inout vec3 oColor) {
     
     vec3 Ns = vec3(0.);
-    float SphereT = TraceSpheres(o, dir, Ns);
+    vec3 sCol=vec3(1.,0.,0.);
+    float SphereT = TraceSpheres(o, dir, Ns,sCol);
     vec4 Pool = IntersectPool(o, invdir);
     bool ShadeWater = true;
 
@@ -403,7 +448,7 @@ void GetPrimaryRayShading(in vec3 o, in vec3 dir, in vec3 invdir, inout float pr
             }
 
             else {
-                oColor = GetSphereShading(Ns);
+                oColor = GetSphereShading(Ns,sCol);
                 primtraversal = SphereT;
             }
 
@@ -420,7 +465,7 @@ void GetPrimaryRayShading(in vec3 o, in vec3 dir, in vec3 invdir, inout float pr
 
     // Only sphere 
     else if (Pool.x < 0.0f && SphereT > 0.0f && SphereT < WorldTraversal) {
-        oColor = GetSphereShading(Ns);
+        oColor = GetSphereShading(Ns,sCol);
         primtraversal = SphereT;
         ShadeWater = false;
     }
@@ -435,6 +480,8 @@ void GetPrimaryRayShading(in vec3 o, in vec3 dir, in vec3 invdir, inout float pr
 }
 
 void main() {
+
+    HASH2SEED = (v_TexCoords.x * v_TexCoords.y) * 64.0 * 1.;
 
 	vec3 RayOrigin = u_InverseView[3].xyz;
 	vec3 RayDirection = (SampleIncidentRayDirection(v_TexCoords));

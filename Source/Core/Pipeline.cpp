@@ -75,7 +75,7 @@ namespace Simulation {
 
 	float WaterBlueness = 1.75f;
 
-	bool DoContainerCollisions = false;
+	bool DoContainerCollisions = true;
 	bool DoSSCollisions = true;
 	
 	bool PhysicsStep = false;
@@ -83,6 +83,12 @@ namespace Simulation {
 	glm::vec3 SunDirection;
 
 	int CheckerStep = 0; // Global variable that oscillates b/w 0 and 1
+
+	static bool DoGLDebugCallback = false;
+
+	// destroy 
+	bool DestroySpheresAfterTime = true;
+	float SphereDestroyTime = 5.0f;
 
 	float* Heightmap;
 	float* ObjectHeights[2];
@@ -109,6 +115,9 @@ namespace Simulation {
 		glm::vec3 NetAcceleration;
 		glm::vec3 NetForce;
 
+		float Life = 0.;
+		glm::vec3 Color = glm::vec3(0.);
+
 		inline float Mass() const noexcept {
 			const float m = (4.0f / 3.0f) * 3.141592653;
 			return m * Radius * Radius * Radius * Density;
@@ -122,6 +131,7 @@ namespace Simulation {
 
 	struct RenderSphere {
 		glm::vec4 PositionRadius;
+		glm::vec4 Data;
 	};
 
 	std::vector<Sphere> Spheres;
@@ -135,6 +145,20 @@ namespace Simulation {
 	FPSCamera& Camera = MainPlayer.Camera;
 
 	std::vector<Object> Objects;
+
+	float DistanceSqr(glm::vec3 x, glm::vec3 y) {
+		glm::vec3 d = y - x;
+		return glm::abs(dot(d, d));
+	}
+
+
+	glm::vec3 GetNiceColor() {
+
+		glm::vec3 Col;
+		const glm::vec3 Mixer = glm::vec3(1.);
+		Col = glm::vec3(RandomGen.Float(), RandomGen.Float(), RandomGen.Float());
+		return Col;
+	}
 
 	glm::vec3 RSI(glm::vec3 Origin, glm::vec3 Dir, float Radius)
 	{
@@ -199,7 +223,9 @@ namespace Simulation {
 			ImGuiIO& io = ImGui::GetIO();
 			if (ImGui::Begin("Debug/Edit Mode")) {
 
-				ImGui::SliderFloat("DebugVar", &DebugVar, -1., 1.0f);
+				//ImGui::SliderFloat("DebugVar", &DebugVar, -1., 1.0f);
+				ImGui::NewLine();
+				ImGui::Checkbox("Do OpenGL Debug Callback?", &DoGLDebugCallback);
 				ImGui::NewLine();
 
 				ImGui::Text("Camera Position : %f,  %f,  %f", Camera.GetPosition().x, Camera.GetPosition().y, Camera.GetPosition().z);
@@ -217,7 +243,7 @@ namespace Simulation {
 				ImGui::NewLine();
 				ImGui::SliderFloat("Range of water volume", &Range, 0.1f, 32.0f);
 				ImGui::SliderFloat("Range of Pool", &PoolRange, 0.1f, Range);
-				ImGui::SliderFloat("Height of Pool", &PoolHeight, 0.1f, 32.0f);
+				ImGui::SliderFloat("Height of Pool", &PoolHeight, 0.125f, 16.0f);
 				if (ImGui::Button("Snap Pool")) {
 					PoolRange = Range;
 				}
@@ -277,6 +303,8 @@ namespace Simulation {
 				if (Spheres.size() < MAX_SPHERES) {
 					if (ImGui::Button("PLACE Sphere")) {
 						Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (SphereRad * 2.1f)), glm::vec3(0.0f), CurrDens, SphereRad, glm::vec3(0.0f), {} };
+						s1.Color = GetNiceColor();
+						s1.Life = 0.;
 						Spheres.push_back(s1);
 					}
 
@@ -284,6 +312,8 @@ namespace Simulation {
 
 					if (ImGui::Button("THROW Sphere")) {
 						Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (SphereRad * 2.1f)), Camera.GetFront() * SphereVel, CurrDens, SphereRad, glm::vec3(0.0f), {}};
+						s1.Color = GetNiceColor();
+						s1.Life = 0.;
 						Spheres.push_back(s1);
 					}
 
@@ -292,7 +322,11 @@ namespace Simulation {
 					ImGui::SliderFloat("Radii of Sphere", &SphereRad, 0.05f, 2.0f);
 					ImGui::SliderFloat("Sphere Density (Density of water is 1000 kg/m3)", &CurrDens, 2.0f, 4000.0f);
 					ImGui::SliderFloat("Magnitude of velocity of sphere", &SphereVel, 0.0f, 16.0f);
-					
+					ImGui::NewLine();
+					ImGui::Checkbox("Destroy Spheres After Some Time", &DestroySpheresAfterTime);
+					if (DestroySpheresAfterTime) {
+						ImGui::SliderFloat("Time after which to destroy spheres", &SphereDestroyTime, 0.5f, 60.0f);
+					}
 				}
 				ImGui::NewLine();
 
@@ -364,12 +398,16 @@ namespace Simulation {
 			if (e.type == Simulation::EventTypes::KeyPress && e.key == GLFW_KEY_Q && this->GetCurrentFrame() > 5 && Spheres.size() < MAX_SPHERES)
 			{
 				Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (SphereRad * 2.1f)), Camera.GetFront() * SphereVel, CurrDens, SphereRad, glm::vec3(0.0f), {} };
+				s1.Life = 0.;
+				s1.Color = GetNiceColor();
 				Spheres.push_back(s1);
 			}
 
 			if (e.type == Simulation::EventTypes::KeyPress && e.key == GLFW_KEY_E && this->GetCurrentFrame() > 5 && Spheres.size() < MAX_SPHERES)
 			{
 				Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (SphereRad * 2.1f)), Camera.GetFront() * 0.f, CurrDens, SphereRad, glm::vec3(0.0f), {} };
+				s1.Life = 0.;
+				s1.Color = GetNiceColor();
 				Spheres.push_back(s1);
 			}
 
@@ -542,10 +580,19 @@ namespace Simulation {
 
 	void CollideObjects(float dt) {
 
+		float Size = PoolRange;
+		float Height = PoolHeight;
+		const float Thickness = 0.04f;
+		const float Bias = 0.0f;
+		glm::vec3 BoxPositions[5] = { glm::vec3(0., -0., Size + Bias), glm::vec3(0., -0., -Size - Bias), glm::vec3(Size + Bias, -0., 0.),
+			glm::vec3(-Size - Bias, -0., 0.), glm::vec3(0., -Height, 0.) };
+		glm::vec3 BoxRanges[5] = { glm::vec3(Size, Height, Thickness), glm::vec3(Size, Height, Thickness), glm::vec3(Thickness, Height, Size), glm::vec3(Thickness, Height, Size), glm::vec3(Size, Thickness, Size) };
+
 
 		for (int i = 0; i < Spheres.size(); i++) {
 
 			auto& e = Spheres[i];
+			e.Life += dt;
 
 			if (DoSSCollisions) {
 				for (int j = 0; j < Spheres.size(); j++) {
@@ -588,7 +635,7 @@ namespace Simulation {
 				float Length = glm::length(DeltaP);
 
 				// DESPAWN IF TOO FAR
-				if (Length > 4.0f * Range) {
+				if (Length > 5.0f * Range || (DestroySpheresAfterTime && (e.Life > (SphereDestroyTime+0.1)))) {
 					Spheres.erase(Spheres.begin() + i);
 				}
 
@@ -612,16 +659,30 @@ namespace Simulation {
 
 			if (DoContainerCollisions)
 			{
-				float Length = glm::length(e.Position);
-				glm::vec3 Dir = e.Position / glm::max(Length, 0.00001f);
+				// Use impulse solver for the pool-box collisionsas
+				for (int k = 0; k < 5; k++) {
 
-				glm::vec3 p = e.Position;
+					const float scaler = 1.;
+					glm::vec3 BoxMin = BoxPositions[k] - scaler*BoxRanges[k];
+					glm::vec3 BoxMax = BoxPositions[k] + scaler*BoxRanges[k];
+					glm::vec3 ClosestPoint = glm::max(BoxMin, glm::min(e.Position, BoxMax));
 
-				if (Length >= 16. - e.Radius) {
+					glm::vec3 Delta = ClosestPoint - e.Position;
 
-					float Delta = (16. - e.Radius) - Length;
-					e.Position += Delta * Dir;
-					e.Velocity = (e.Position - p) / dt;
+					float Length = glm::length(Delta);
+
+					if (Length <= e.Radius) {
+
+						glm::vec3 CollisionNormal = Delta / Length;
+
+						glm::vec3 dDelta = CollisionNormal * (e.Radius - Length);
+
+						e.Position -= dDelta;
+
+						// Impulse solver 
+						float vProjected = glm::dot(e.Velocity, CollisionNormal);
+						e.Velocity -= CollisionNormal * vProjected;
+					}
 				}
 			}
 
@@ -830,7 +891,7 @@ namespace Simulation {
 		GLuint SphereSSBO = 0;
 		glGenBuffers(1, &SphereSSBO);
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, SphereSSBO);
-		glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(RenderSphere) * MAX_SPHERES, (void*)0, GL_DYNAMIC_DRAW);
+		glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(RenderSphere) * (MAX_SPHERES+1), (void*)0, GL_DYNAMIC_DRAW);
 		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 
 		GLuint FocusSSBO = 0;
@@ -880,6 +941,8 @@ namespace Simulation {
 
 		while (!glfwWindowShouldClose(app.GetWindow())) {
 
+			app.SetDoDebugCallback(DoGLDebugCallback);
+
 			// Update 
 			glDisable(GL_CULL_FACE);
 
@@ -921,7 +984,11 @@ namespace Simulation {
 
 			std::vector<RenderSphere> Data;
 			for (int i = 0; i < Spheres.size(); i++) {
-				Data.push_back({ glm::vec4(Spheres[i].Position, Spheres[i].Radius) });
+
+				RenderSphere r;
+				r.PositionRadius= glm::vec4(Spheres[i].Position, Spheres[i].Radius), glm::vec4(1.);
+				r.Data = glm::vec4(Spheres[i].Color, Spheres[i].Life);
+				Data.push_back(r);
 			}
 
 			// Upload data
@@ -948,6 +1015,7 @@ namespace Simulation {
 			BasicRender.SetInteger("u_Res", Resolution);
 			BasicRender.SetInteger("u_ResV", Resolution);
 			BasicRender.SetVector3f("u_SunDirection", SunDirection);
+
 
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, HeightmapSSBO);
 
@@ -992,6 +1060,9 @@ namespace Simulation {
 			RaytracingShader.SetInteger("u_ScreenResW", app.GetWidth());
 
 			RaytracingShader.SetVector3f("u_SunDirection", SunDirection);
+			
+			RaytracingShader.SetBool("u_DestroySpheresAfterTime", DestroySpheresAfterTime);
+			RaytracingShader.SetFloat("u_DestroyTime", SphereDestroyTime);
 
 			if (app.GetCursorLocked()) {
 				RaytracingShader.SetInteger("u_MouseY", app.GetHeight() / 2);
@@ -1007,6 +1078,8 @@ namespace Simulation {
 				RaytracingShader.SetInteger("u_MouseY", fp.y);
 				RaytracingShader.SetInteger("u_MouseX", fp.x);
 			}
+
+
 			
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, SphereSSBO);
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 1, FocusSSBO);
