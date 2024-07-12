@@ -4,7 +4,7 @@
 
 </br>
 
-![SS][https://github.com/swr06/WaterSurfaceSimulator/blob/master/Screenshots/1.png]
+![Image](https://github.com/swr06/WaterSurfaceSimulator/blob/master/Screenshots/1.png)
 
 </br>
 
