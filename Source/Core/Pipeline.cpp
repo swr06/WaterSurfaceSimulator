@@ -682,8 +682,15 @@ namespace Simulation {
 				for (int k = 0; k < 5; k++) {
 
 					const float scaler = 1.;
-					glm::vec3 BoxMin = BoxPositions[k] - scaler*BoxRanges[k];
-					glm::vec3 BoxMax = BoxPositions[k] + scaler*BoxRanges[k];
+
+					glm::vec3 CP = BoxPositions[k];
+
+					CP.y -= Height;
+					CP.y += 2.;
+
+					glm::vec3 BoxMin = CP - scaler*BoxRanges[k];
+					glm::vec3 BoxMax = CP + scaler*BoxRanges[k];
+
 					glm::vec3 ClosestPoint = glm::max(BoxMin, glm::min(e.Position, BoxMax));
 
 					glm::vec3 Delta = ClosestPoint - e.Position;
