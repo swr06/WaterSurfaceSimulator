@@ -655,7 +655,7 @@ namespace Simulation {
 
 				// DESPAWN IF TOO FAR
 				float Threshold = std::max(8.0f * Range, Height * 3.0f);
-				if (Length > Threshold * Range || (DestroySpheresAfterTime && (e.Life > (SphereDestroyTime+0.1)))) {
+				if (Length > Threshold || (DestroySpheresAfterTime && (e.Life > (SphereDestroyTime+0.1)))) {
 					Spheres.erase(Spheres.begin() + i);
 				}
 
