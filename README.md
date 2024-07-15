@@ -1,17 +1,3 @@
-# Water Surface Simulator
-
-***Experimental*** 2.5 Dimensional Fluid Simulation. This simulation is done on the CPU and the rendering is done using the GPU.
-
-</br>
-
-![] (https://github.com/swr06/WaterSurfaceSimulator/blob/master/Screenshots/1.png)
-
-</br>
-
-# Todo : 
-- Caustics (either analytical or mesh caustics)
-- Underwater volumetrics
-
 <!-- Allow this file to not have a first line heading -->
 <!-- markdownlint-disable-file MD041 -->
 
@@ -37,3 +23,6 @@
 
 </br>
 
+## Todo : 
+- Caustics (either analytical or mesh caustics)
+- Underwater volumetrics
