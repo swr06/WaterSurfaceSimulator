@@ -91,6 +91,8 @@ namespace Simulation {
 	bool DestroySpheresAfterTime = true;
 	float SphereDestroyTime = 5.0f;
 
+	bool AmbientOcclusion = true;
+
 	float* Heightmap;
 	float* ObjectHeights[2];
 	float* WaterVelocities;
@@ -248,6 +250,8 @@ namespace Simulation {
 				ImGui::NewLine();
 				ImGui::SliderFloat("Water Blueness", &WaterBlueness, 0.01f, 6.0f);
 				ImGui::NewLine();
+				ImGui::Checkbox("Ambient Occlusion?", &AmbientOcclusion);
+				ImGui::NewLine();
 				ImGui::SliderFloat("Range of water volume", &Range, 0.1f, 32.0f);
 				ImGui::SliderFloat("Range of Pool", &PoolRange, 0.1f, Range);
 				ImGui::SliderFloat("Height of Pool", &PoolHeight, 0.125f, 16.0f);
@@ -356,8 +360,12 @@ namespace Simulation {
 		{
 			ImGuiIO& io = ImGui::GetIO();
 
-			if (e.type == Simulation::EventTypes::MousePress && !ImGui::GetIO().WantCaptureMouse && GetCurrentFrame() > 32)
+			if (e.type == Simulation::EventTypes::MousePress && e.button == GLFW_MOUSE_BUTTON_RIGHT && !ImGui::GetIO().WantCaptureMouse && GetCurrentFrame() > 32 && this->GetCursorLocked())
 			{
+				Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (SphereRad * 2.1f)), Camera.GetFront() * SphereVel, CurrDens, SphereRad, glm::vec3(0.0f), {} };
+				s1.Life = 0.;
+				s1.Color = GetNiceColor();
+				Spheres.push_back(s1);
 			}
 
 			if (e.type == Simulation::EventTypes::MouseMove && GetCursorLocked())
@@ -1105,6 +1113,7 @@ namespace Simulation {
 			RaytracingShader.SetVector3f("u_SunDirection", SunDirection);
 			
 			RaytracingShader.SetBool("u_DestroySpheresAfterTime", DestroySpheresAfterTime);
+			RaytracingShader.SetBool("u_AmbientOcclusion", AmbientOcclusion);
 			RaytracingShader.SetFloat("u_DestroyTime", SphereDestroyTime);
 
 			if (app.GetCursorLocked()) {

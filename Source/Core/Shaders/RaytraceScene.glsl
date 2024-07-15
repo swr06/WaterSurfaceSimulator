@@ -43,6 +43,7 @@ uniform int u_MouseY;
 uniform vec3 u_SunDirection;
 
 uniform bool u_DestroySpheresAfterTime;
+uniform bool u_AmbientOcclusion;
 uniform float u_DestroyTime;
 
 uniform float u_WaterBlueness;
@@ -64,6 +65,11 @@ layout (std430, binding = 1) buffer SSBO_CenterPx {
 layout (std430, binding = 2) buffer SSBO_HM {
 	float Heightmap[];
 };
+
+// Globals
+bool PlayerInWater = false;
+vec3 WaterColor;
+float GlobalHash;
 
 // RNG 
 float HASH2SEED = 0.0f;
@@ -251,6 +257,19 @@ float TraceSphere(vec3 Origin, vec3 Dir, float Radius)
     }
 }
 
+float SphSDF(vec3 p, float s)
+{
+    return length(p)-s;
+}
+
+float BoxSDF(vec3 p, vec3 b)
+{
+    vec3 q = abs(p) - b;
+    return length(max(q,0.0)) + min(max(q.x,max(q.y,q.z)),0.0);
+}
+
+
+
 vec3 WorldPosFromDepth(float depth, vec2 txc)
 {
     float z = depth * 2.0 - 1.0;
@@ -261,14 +280,14 @@ vec3 WorldPosFromDepth(float depth, vec2 txc)
     return WorldPos.xyz;
 }
 
-float TraceSpheres(vec3 O, vec3 D, out vec3 N,out vec3 Col) {
+float TraceSpheres(vec3 O, vec3 D, out vec3 N,out vec3 Col, out int ID) {
 
+    ID=-1;
     if (!u_RenderSpheres) {
         return -1.;
     }
 
     int PixelSum = int(gl_FragCoord.x) + int(gl_FragCoord.y) + int(16.*bayer256(gl_FragCoord.xy));
-    float Hash = bayer256(gl_FragCoord.xy).x;
 
     float Dist = 100000.;
     bool Int = false;
@@ -282,7 +301,7 @@ float TraceSpheres(vec3 O, vec3 D, out vec3 N,out vec3 Col) {
                 float Transparency = clamp(u_DestroyTime-TimeElapsed,0.,1.);
                 Transparency*=Transparency;
                 // float Hash = hash2().x;
-                if (Hash > Transparency) {
+                if (GlobalHash > Transparency) {
                      continue;
                 }
            }
@@ -292,6 +311,7 @@ float TraceSpheres(vec3 O, vec3 D, out vec3 N,out vec3 Col) {
                Int = true;
                C = SphereData[i].Data0.xyz;
                Col = SphereData[i].Data1.xyz;
+               ID = i;
            }
        }
 
@@ -363,24 +383,95 @@ vec4 IntersectPool(in vec3 o, in vec3 inv_d) {
     return Int ? vec4(MaxDist, Nf) : vec4(-1.);
 }
 
+
+float SDFScene(vec3 O) {
+
+    float MinDist = 100000.;
+
+    float eps = 0.001f;
+
+    for (int i = 0 ; i < u_Spheres ; i ++) {
+        float D = SphSDF(O - SphereData[i].Data0.xyz, SphereData[i].Data0.w);
+        
+        if (u_DestroySpheresAfterTime) {            
+                float TimeElapsed = SphereData[i].Data1.w;
+                float Transparency = clamp(u_DestroyTime-TimeElapsed,0.,1.);
+                Transparency*=Transparency;
+                if (GlobalHash > Transparency) {
+                     continue;
+                }
+        }
+
+        if (D>eps) {
+            MinDist = min(D,MinDist);
+        }   
+    }
+
+    const float Bias = 0.0f;
+
+    float Thickness = 0.04f;
+
+    const float Size = u_PoolRange;
+    const float Height = u_PoolHeight;
+
+    float c[3] = float[](1.,1.,1.);
+
+
+    const vec3 BoxPositions[5] = vec3[]( vec3(0.,-0.,Size + Bias), vec3(0.,-0.,-Size - Bias), vec3(Size + Bias,-0.,0.),
+                                    vec3(-Size - Bias,-0.,0.), vec3(0.,-Height,0.) ); 
+    const vec3 BoxRanges[5] = vec3[]( vec3(Size, Height+0.55f, Thickness), vec3(Size, Height+0.55f, Thickness), vec3(Thickness, Height+0.55f, Size), vec3(Thickness, Height+0.55f, Size), vec3(Size + 0.04f, 0.54f, Size+ 0.04f) );
+
+    for (int i = 0 ; i < 5 ;i++) { 
+        float D = BoxSDF(O - BoxPositions[i] + vec3(0.,Height - 1.5f,0.), BoxRanges[i]);
+        if (D>eps) {
+            MinDist = min(D,MinDist);
+        }
+    }
+
+
+    return MinDist;
+}
+
+vec3 CosWeightedHemisphere(const vec3 n, vec2 r) 
+{
+	float PI2 = 2.0f * 3.14159265359;
+	vec3  uu = normalize(cross(n, vec3(0.0,1.0,1.0)));
+	vec3  vv = cross(uu, n);
+	float ra = sqrt(r.y);
+	float rx = ra * cos(PI2 * r.x); 
+	float ry = ra * sin(PI2 * r.x); 
+	float rz = sqrt(1.0 - r.y);
+	vec3  rr = vec3(rx * uu + ry * vv + rz * n );
+    return normalize(rr);
+}
+
+float AO(vec3 P, vec3 N) {
+    
+    if(!u_AmbientOcclusion){ return 1.; }
+
+    float ScSDF = max(SDFScene(P),0.);
+    return clamp(0.25f + (1.-exp(-ScSDF*6.0)), 0., 1.);
+}
+
 vec3 GetPoolShading(in vec3 wp, in vec3 n) {
     vec2 Uv = GetBoxUV(wp, n);
     //float Caustic = n == vec3(0.,1.,0.) ? CalculateCausticsNV(wp, 4.0f) : 1.;
     float Caustic = 1.0f;
     vec3 Albedo = SmoothFilter(u_PoolTexture, Uv.xy).xyz;
-    return Albedo * Caustic ;
+    return Albedo * AO(wp,n) * mix(IndirectLighting,vec3(1.),0.9f) ;
 }
 
-vec3 GetSphereShading(vec3 N, vec3 SC) {
+vec3 GetSphereShading(vec3 N, vec3 SC, vec3 WP) {
     float Lambert = max(0.0f, dot(N, FakeLightDir));
-    return SC * (vec3(Lambert) + IndirectLighting);
+    return SC * (vec3(Lambert) + SC * IndirectLighting * AO(WP,N));
 }
 
 vec4 GetRayShading(in vec3 o, in vec3 dir, in vec3 invdir) {
     
     vec3 Ns = vec3(0.);
     vec3 sCol=vec3(1.,0.,0.);
-    float SphereT = TraceSpheres(o, dir, Ns,sCol);
+    int sid=-1;
+    float SphereT = TraceSpheres(o, dir, Ns,sCol,sid);
     vec4 Pool = IntersectPool(o, invdir);
 
     // both intersected 
@@ -394,7 +485,7 @@ vec4 GetRayShading(in vec3 o, in vec3 dir, in vec3 invdir) {
             }
 
             else {
-                return vec4( GetSphereShading(Ns,sCol), SphereT);
+                return vec4( GetSphereShading(Ns,sCol,o + dir * SphereT), SphereT);
             }
         }
     }
@@ -406,31 +497,54 @@ vec4 GetRayShading(in vec3 o, in vec3 dir, in vec3 invdir) {
 
     // Only sphere 
     if (Pool.x < 0.0f && SphereT > 0.0f) {
-        return vec4(GetSphereShading(Ns,sCol), SphereT);
+        return vec4(GetSphereShading(Ns,sCol,o + dir * SphereT), SphereT);
     }
 
     // None
     return vec4(SampleSkyAt(dir), -1.);
 }
 
-vec3 GetPrimaryRayWater(in vec3 wp, in vec3 dir, in vec3 n) {
+vec3 GetPrimaryRayWater(in vec3 wp, in vec3 dir, vec3 n) {
+
+    float Cosine = dot(dir,n);
+
+    n *= -sign(Cosine);
+    
     vec3 ReflectedDir = reflect(dir, n);
-    vec3 RefractedDir = refract(dir, n, 1.0f / 1.33f);
+
+    float n1byn2 = PlayerInWater ? 1.33 : 1./1.33;
+
+    const float CriticalAngleCos = sqrt(1. - (1. / (1.33f*1.33)));
+    bool InSnellWindow = Cosine > CriticalAngleCos;
+
+    vec3 RefractedDir = refract(dir, n, n1byn2);
 
     vec3 Refracted = GetRayShading(wp,RefractedDir,1./RefractedDir).xyz;
     vec3 Reflected = GetRayShading(wp,ReflectedDir,1./ReflectedDir).xyz;
-    float Fresnel = (pow(1.0 - max(0.0, dot(-vec3(0.,1.,0.), dir)), 2.f));;
+    float Fresnel = (pow(1.0 - max(0.0, dot( vec3(0.,1.,0.) * sign(dot(dir,vec3(0.,1.,0.))), dir)), 1.8f));;
 
-    vec3 WaterColor = vec3(0.75f, 0.9f, 1.6f);
+    
     //vec3 WaterColor = sqrt(texture(u_Skybox, vec3(0.,1.,0.)).xyz);
-    return mix(Refracted * clamp(WaterColor / vec3(u_WaterBlueness, u_WaterBlueness,1.), 0. ,1.), Reflected, Fresnel);;
+   
+    if (PlayerInWater) {
+   
+        if (!InSnellWindow){
+            return Reflected * ( mix(WaterColor, vec3(1.), 0.8f));
+        }
+
+        return Refracted * ( mix(WaterColor, vec3(1.), 0.8f));
+    }
+    return mix(Refracted * WaterColor, Reflected, Fresnel);
 }
+
+
 
 void GetPrimaryRayShading(in vec3 o, in vec3 dir, in vec3 invdir, inout float primtraversal, in vec3 Normals, in vec3 WP, inout vec3 oColor) {
     
     vec3 Ns = vec3(0.);
     vec3 sCol=vec3(1.,0.,0.);
-    float SphereT = TraceSpheres(o, dir, Ns,sCol);
+    int sid=-1;
+    float SphereT = TraceSpheres(o, dir, Ns,sCol,sid);
     vec4 Pool = IntersectPool(o, invdir);
     bool ShadeWater = true;
 
@@ -448,7 +562,7 @@ void GetPrimaryRayShading(in vec3 o, in vec3 dir, in vec3 invdir, inout float pr
             }
 
             else {
-                oColor = GetSphereShading(Ns,sCol);
+                oColor = GetSphereShading(Ns,sCol,o + dir * SphereT);
                 primtraversal = SphereT;
             }
 
@@ -465,7 +579,7 @@ void GetPrimaryRayShading(in vec3 o, in vec3 dir, in vec3 invdir, inout float pr
 
     // Only sphere 
     else if (Pool.x < 0.0f && SphereT > 0.0f && SphereT < WorldTraversal) {
-        oColor = GetSphereShading(Ns,sCol);
+        oColor = GetSphereShading(Ns,sCol,o + dir * SphereT);
         primtraversal = SphereT;
         ShadeWater = false;
     }
@@ -481,11 +595,19 @@ void GetPrimaryRayShading(in vec3 o, in vec3 dir, in vec3 invdir, inout float pr
 
 void main() {
 
+    GlobalHash=bayer256(gl_FragCoord.xy).x;
+    WaterColor = vec3(0.75f, 0.9f, 1.6f);
+    WaterColor = clamp(WaterColor / vec3(u_WaterBlueness, u_WaterBlueness,1.), 0. ,1.);
+
     HASH2SEED = (v_TexCoords.x * v_TexCoords.y) * 64.0 * 1.;
 
 	vec3 RayOrigin = u_InverseView[3].xyz;
 	vec3 RayDirection = (SampleIncidentRayDirection(v_TexCoords));
     vec3 InvDir = 1.0f / RayDirection;
+
+    if (abs(RayOrigin.x) < u_Range && abs(RayOrigin.z) < u_Range && RayOrigin.y < 1.0125f) {
+        PlayerInWater = true;
+    }
 
     vec3 n = vec3(0.0f);
 
@@ -519,8 +641,6 @@ void main() {
     vec3 Color;
     GetPrimaryRayShading(RayOrigin, RayDirection, InvDir, Dist, NormalsSampled, WorldPos, Color);
 
-    o_Color = vec4(Color, 1.);
+    o_Color = vec4(Color * (PlayerInWater?pow(WaterColor,vec3(1.2f)):vec3(1.)), 1.);
 
-    //if (!NonWaterPx)
-    //     o_Color = vec4(CalculateCausticsNV(WorldPos.xyz, 4.0f).xxx, 1.);
 }
