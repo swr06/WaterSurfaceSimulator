@@ -385,8 +385,9 @@ namespace Simulation {
 		{
 			ImGuiIO& io = ImGui::GetIO();
 
-			if (e.type == Simulation::EventTypes::MousePress && e.button == GLFW_MOUSE_BUTTON_RIGHT && !ImGui::GetIO().WantCaptureMouse && GetCurrentFrame() > 32 && this->GetCursorLocked())
+			if (e.type == Simulation::EventTypes::MousePress && e.button == GLFW_MOUSE_BUTTON_RIGHT && !ImGui::GetIO().WantCaptureMouse && GetCurrentFrame() > 32 && this->GetCursorLocked() && Spheres.size() + 1 <= MAX_SPHERES)
 			{
+
 				Sphere s1 = { glm::vec3(Camera.GetPosition() + Camera.GetFront() * (SphereRad * 2.1f)), Camera.GetFront() * SphereVel, CurrDens, SphereRad, glm::vec3(0.0f), {} };
 				s1.Life = 0.;
 				s1.Color = GetNiceColor();
