@@ -595,17 +595,27 @@ void GetPrimaryRayShading(in vec3 o, in vec3 dir, in vec3 invdir, inout float pr
 
 void main() {
 
-    GlobalHash=bayer256(gl_FragCoord.xy).x;
+    HASH2SEED = (v_TexCoords.x * v_TexCoords.y) * 64.0 * 1.;
+
+    GlobalHash = bayer256(gl_FragCoord.xy).x;
+
     WaterColor = vec3(0.75f, 0.9f, 1.6f);
     WaterColor = clamp(WaterColor / vec3(u_WaterBlueness, u_WaterBlueness,1.), 0. ,1.);
 
-    HASH2SEED = (v_TexCoords.x * v_TexCoords.y) * 64.0 * 1.;
 
 	vec3 RayOrigin = u_InverseView[3].xyz;
 	vec3 RayDirection = (SampleIncidentRayDirection(v_TexCoords));
     vec3 InvDir = 1.0f / RayDirection;
 
-    if (abs(RayOrigin.x) < u_Range && abs(RayOrigin.z) < u_Range && RayOrigin.y < 1.0125f) {
+    float WaterHeightAtPlayer = 1.1f;
+
+    {
+        vec2 pUV = fract(((u_Range + RayOrigin.xz) / u_Range) * 0.5f);
+        WaterHeightAtPlayer = Bilinear(pUV);
+    }
+
+    //P-box intersect 
+    if (abs(RayOrigin.x) < u_Range && abs(RayOrigin.z) < u_Range && RayOrigin.y < WaterHeightAtPlayer && RayOrigin.y > 2.-u_PoolHeight*2.) {
         PlayerInWater = true;
     }
 
@@ -629,7 +639,7 @@ void main() {
     // Ripple handling
      if (ivec2(gl_FragCoord.xy) == ivec2(u_MouseX, u_MouseY)) {
         vec2 wsUV = fract(((u_Range + WorldPos.xz) / u_Range) * 0.5f);
-        CenterPxPacked = vec4(wsUV, float(NonWaterPx), 1.);
+        CenterPxPacked = vec4(wsUV, float(NonWaterPx), float(PlayerInWater));
     }
 
     float Dist = NonWaterPx ? -1. : distance(RayOrigin, WorldPos);

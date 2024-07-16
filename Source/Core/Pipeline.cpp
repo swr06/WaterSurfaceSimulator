@@ -9,14 +9,19 @@
 
 #include "GLClasses/CubeTextureMap.h"
 
-#define MAX_SPHERES 24
+#include <thread>
+#include <sstream>
+#include <chrono>
+#include <mutex>
+
+#define MAX_SPHERES 32
 
 // in meters
 #define MAX_WAVE_HEIGHT 8 
 
 namespace Simulation {
 
-	// TODO ; WEight for heightmap contrib
+	// TODO : Weight for heightmap contrib
 
 	const glm::vec2 PoissonDisk[32] = {
 		glm::vec2(-0.613392, 0.617481), glm::vec2(0.751946, 0.453352),
@@ -38,6 +43,9 @@ namespace Simulation {
 	};
 
 	float Exposure = 1.8f;
+
+	// Threader
+	std::mutex DumpMutex;
 
 	// kg/m^3
 	const float RhoWater = 998.2f;
@@ -90,6 +98,10 @@ namespace Simulation {
 	// destroy 
 	bool DestroySpheresAfterTime = true;
 	float SphereDestroyTime = 5.0f;
+	bool DestroySphIfTooFar = true;
+
+	bool HQFiltering = true;
+	bool HQVertex = true;
 
 	bool AmbientOcclusion = true;
 
@@ -97,9 +109,12 @@ namespace Simulation {
 	float* ObjectHeights[2];
 	float* WaterVelocities;
 	float* WaterAccelerations;
+	float* RenderThreadHeightmap;
 	Random RandomGen;
 
 	typedef glm::vec3 Force;
+
+	bool _RESET_FLAG = false;
 
 	bool IsMouseOverAnyImGuiWindow() {
 		ImGuiIO& io = ImGui::GetIO();
@@ -143,6 +158,7 @@ namespace Simulation {
 	};
 
 	std::vector<Sphere> Spheres;
+	std::vector<Sphere> RenderThreadSpheres;
 
 	float CurrentTime = glfwGetTime();
 	float Frametime = 0.0f;
@@ -251,6 +267,8 @@ namespace Simulation {
 				ImGui::SliderFloat("Water Blueness", &WaterBlueness, 0.01f, 6.0f);
 				ImGui::NewLine();
 				ImGui::Checkbox("Ambient Occlusion?", &AmbientOcclusion);
+				ImGui::Checkbox("High Quality Normals?", &HQFiltering);
+				ImGui::Checkbox("High Quality Displacement?", &HQVertex);
 				ImGui::NewLine();
 				ImGui::SliderFloat("Range of water volume", &Range, 0.1f, 32.0f);
 				ImGui::SliderFloat("Range of Pool", &PoolRange, 0.1f, Range);
@@ -291,14 +309,20 @@ namespace Simulation {
 
 				if (ImGui::Button("Reset Water Sim")) {
 
-					for (int i = 0; i < Resolution * Resolution; i++) {
-						Heightmap[i] = 1.f;
-					}
+					{
+						std::lock_guard<std::mutex> lock(DumpMutex);
+						_RESET_FLAG = true;
 
-					memset(WaterAccelerations, 0, Resolution * Resolution * sizeof(float));
-					memset(WaterVelocities, 0, Resolution * Resolution * sizeof(float));
-					memset(ObjectHeights[0], 0, Resolution * Resolution * sizeof(float));
-					memset(ObjectHeights[1], 0, Resolution * Resolution * sizeof(float));
+						for (int i = 0; i < Resolution * Resolution; i++) {
+							Heightmap[i] = 1.f;
+						}
+
+						memset(WaterAccelerations, 0, Resolution * Resolution * sizeof(float));
+						memset(WaterVelocities, 0, Resolution * Resolution * sizeof(float));
+						memset(ObjectHeights[0], 0, Resolution * Resolution * sizeof(float));
+						memset(ObjectHeights[1], 0, Resolution * Resolution * sizeof(float));
+						Spheres.clear();
+					}
 				}
 
 				ImGui::NewLine();
@@ -334,6 +358,7 @@ namespace Simulation {
 					ImGui::SliderFloat("Sphere Density (Density of water is 1000 kg/m3)", &CurrDens, 2.0f, 4000.0f);
 					ImGui::SliderFloat("Magnitude of velocity of sphere", &SphereVel, 0.0f, 16.0f);
 					ImGui::NewLine();
+					ImGui::Checkbox("Destroy Spheres If Far Away?", &DestroySphIfTooFar);
 					ImGui::Checkbox("Destroy Spheres After Some Time", &DestroySpheresAfterTime);
 					if (DestroySpheresAfterTime) {
 						ImGui::SliderFloat("Time after which to destroy spheres", &SphereDestroyTime, 0.5f, 60.0f);
@@ -427,15 +452,24 @@ namespace Simulation {
 			}
 
 			if (e.type == Simulation::EventTypes::KeyPress && e.key == GLFW_KEY_R && GetCurrentFrame()>16) {
-				for (int i = 0; i < Resolution * Resolution; i++) {
-					Heightmap[i] = 1.f;
+				
+				{
+					std::lock_guard<std::mutex> lock(DumpMutex);
+
+					_RESET_FLAG = true;
+					 
+					for (int i = 0; i < Resolution * Resolution; i++) {
+						Heightmap[i] = 1.f;
+					}
+
+					memset(WaterAccelerations, 0, Resolution * Resolution * sizeof(float));
+					memset(WaterVelocities, 0, Resolution * Resolution * sizeof(float));
+					memset(ObjectHeights[0], 0, Resolution * Resolution * sizeof(float));
+					memset(ObjectHeights[1], 0, Resolution * Resolution * sizeof(float));
+					Spheres.clear();
 				}
 
-				memset(WaterAccelerations, 0, Resolution * Resolution * sizeof(float));
-				memset(WaterVelocities, 0, Resolution * Resolution * sizeof(float));
-				memset(ObjectHeights[0], 0, Resolution * Resolution * sizeof(float));
-				memset(ObjectHeights[1], 0, Resolution * Resolution * sizeof(float));
-				Spheres.clear();
+				
 			}
 
 
@@ -487,6 +521,37 @@ namespace Simulation {
 				}
 
 				float Acceleration = kProportionality * (SigmaH - 4.0f * H);
+
+				WaterAccelerations[To1DIdx(x, y)] = Acceleration;
+
+			}
+		}
+
+	}
+
+	void SimulateWaterAccelerationBox(float Dt) {
+
+
+		for (int x = 0; x < Resolution; x++) {
+			for (int y = 0; y < Resolution; y++) {
+
+				float H = SampleHeightClamped(x, y);
+
+				float SigmaH = 0.;
+
+				int radius = 1;
+
+				int TotalSamples = 0;
+
+				for (int i = -radius; i <= radius; i++) {
+					for (int j = -radius; j <= radius; j++) {
+						if (i == 0 && j == 0) { continue; }
+						SigmaH += SampleHeightClamped(glm::ivec2(x, y) + glm::ivec2(i, j));
+						TotalSamples++;
+					}
+				}
+
+				float Acceleration = kProportionality * (SigmaH - float(TotalSamples) * H);
 
 				WaterAccelerations[To1DIdx(x, y)] = Acceleration;
 
@@ -663,11 +728,18 @@ namespace Simulation {
 
 				// DESPAWN IF TOO FAR
 				float Threshold = std::max(8.0f * Range, Height * 4.0f);
-				if (Length > Threshold || (DestroySpheresAfterTime && (e.Life > (SphereDestroyTime+0.1)))) {
-					Spheres.erase(Spheres.begin() + i);
+
+				bool tempv = true;
+
+				if (DestroySphIfTooFar) {
+
+					if (Length > Threshold || (DestroySpheresAfterTime && (e.Life > (SphereDestroyTime + 0.1)))) {
+						Spheres.erase(Spheres.begin() + i);
+						tempv = false;
+					}
 				}
 
-				else {
+				else if (tempv) {
 
 					glm::vec3 Dir = DeltaP / glm::max(Length, 0.00001f);
 
@@ -808,8 +880,69 @@ namespace Simulation {
 			SimulateObjects(Ddt);
 		}
 
+		
 	}
 
+	bool WorkerThreadAlive = true;
+	float WorkerThreadDeltaTime = 0.;
+
+	void WorkerThread() {
+
+		std::chrono::steady_clock::time_point PrevTime = std::chrono::steady_clock::now();
+		static float WorkerDt = 1./60.;
+
+		while (WorkerThreadAlive) {
+
+			WorkerThreadDeltaTime = WorkerDt;
+
+			if (_RESET_FLAG)
+			{
+				std::lock_guard<std::mutex> lock(DumpMutex);
+
+				_RESET_FLAG = false;
+
+				for (int i = 0; i < Resolution * Resolution; i++) {
+					Heightmap[i] = 1.f;
+				}
+
+				memset(WaterAccelerations, 0, Resolution * Resolution * sizeof(float));
+				memset(WaterVelocities, 0, Resolution * Resolution * sizeof(float));
+				memset(ObjectHeights[0], 0, Resolution * Resolution * sizeof(float));
+				memset(ObjectHeights[1], 0, Resolution * Resolution * sizeof(float));
+				Spheres.clear();
+			}
+
+			if (!DoSim) {
+				std::this_thread::sleep_for(std::chrono::milliseconds(16));
+
+				{
+					std::lock_guard<std::mutex> lock(DumpMutex);
+					RenderThreadSpheres = Spheres;
+					memcpy(RenderThreadHeightmap, Heightmap, Resolution * Resolution * sizeof(float));
+				}
+
+				std::chrono::duration<double> dur = std::chrono::steady_clock::now() - PrevTime;
+				WorkerDt = dur.count();
+				PrevTime = std::chrono::steady_clock::now();
+
+				continue;
+			}
+
+			SimulateWater(WorkerDt);
+
+			{
+				std::lock_guard<std::mutex> lock(DumpMutex);
+				RenderThreadSpheres = Spheres;
+				memcpy(RenderThreadHeightmap, Heightmap, Resolution * Resolution * sizeof(float));
+			}
+
+			std::chrono::duration<double> dur = std::chrono::steady_clock::now() - PrevTime;
+			WorkerDt = dur.count();
+			PrevTime = std::chrono::steady_clock::now();
+
+		}
+
+	}
 
 	void Pipeline::StartPipeline()
 	{
@@ -819,13 +952,17 @@ namespace Simulation {
 
 		std::cout << "\n\n--------------------\n\n";
 
-		int q = 0;
-		int ResolutionModes[5] = { 64, 128, 256, 384, 512 };
+		int q = 0, mt=0;
+		int ResolutionModes[6] = { 64, 128, 256, 384, 512, 768 };
 
-		std::cout << "Enter the quality of the simulation grid (Between 1 -> 5, 3 is recommended) : ";
+		std::cout << "Enter the quality of the simulation grid (Between 1 -> 6, 3 is recommended) : ";
 		std::cin >> q;
+		std::cout << "\nUse Multi-Threaded mode? (0 = No, 1 = Yes) : ";
+		std::cin >> mt;
 
-		q = glm::clamp(q, 1, 5);
+		mt = int(bool(mt));
+
+		q = glm::clamp(q, 1, 6);
 		q--;
 
 		Resolution = ResolutionModes[q];
@@ -952,12 +1089,15 @@ namespace Simulation {
 
 		// Create Heightmaps
 		Heightmap = new float[Resolution * Resolution];
+		RenderThreadHeightmap = new float[Resolution * Resolution];
 		ObjectHeights[0] = new float[Resolution * Resolution];
 		ObjectHeights[1] = new float[Resolution * Resolution];
 		WaterVelocities = new float[Resolution * Resolution];
 		WaterAccelerations = new float[Resolution * Resolution];
 
 		memset(Heightmap, 0, Resolution * Resolution * sizeof(float));
+		memset(RenderThreadHeightmap, 0, Resolution * Resolution * sizeof(float));
+		memset(RenderThreadHeightmap, 0, Resolution * Resolution * sizeof(float));
 		memset(WaterAccelerations, 0, Resolution * Resolution * sizeof(float));
 		memset(WaterVelocities, 0, Resolution * Resolution * sizeof(float));
 		memset(ObjectHeights[0], 0, Resolution * Resolution * sizeof(float));
@@ -989,6 +1129,17 @@ namespace Simulation {
 		SimulateObjects(0.00001f);
 		SimulateWater(0.00001f);
 
+		// Start worker.
+
+		if (!mt) {
+			WorkerThreadAlive = false;
+
+			delete RenderThreadHeightmap;
+			RenderThreadHeightmap = Heightmap;
+		}
+
+		std::thread PhysicsThread(WorkerThread);
+
 		while (!glfwWindowShouldClose(app.GetWindow())) {
 
 			app.SetDoDebugCallback(DoGLDebugCallback);
@@ -1009,8 +1160,12 @@ namespace Simulation {
 
 			if (!IsMouseOverAnyImGuiWindow() && glfwGetMouseButton(app.GetWindow(), GLFW_MOUSE_BUTTON_LEFT) == GLFW_PRESS && app.GetCurrentFrame() > 100) {
 				
-				glm::ivec2 px = glm::ivec2(glm::floor(glm::vec2(FocusedUV.x, FocusedUV.y) * glm::vec2(Resolution)));
-				Heightmap[To1DIdxSafe(px.x, px.y)] += MouseRippleSize;
+				{
+					std::lock_guard<std::mutex> lock(DumpMutex);
+					glm::ivec2 px = glm::ivec2(glm::floor(glm::vec2(FocusedUV.x, FocusedUV.y) * glm::vec2(Resolution)));
+					Heightmap[To1DIdxSafe(px.x, px.y)] += MouseRippleSize;
+				}
+
 			}
 
 			// FBO Update
@@ -1021,33 +1176,46 @@ namespace Simulation {
 			MainPlayer.OnUpdate(app.GetWindow(), DeltaTime, MainPlayer.Speed, app.GetCurrentFrame());
 
 			// SIMULATE
-			if (DoSim || PhysicsStep)
-			{
-				SimulateWater(DeltaTime);
-				PhysicsStep = false;
+			if (!mt) {
+				if (DoSim || PhysicsStep)
+				{
+					SimulateWater(DeltaTime);
+					PhysicsStep = false;
+				}
+
+				RenderThreadSpheres = Spheres;
 			}
 
-
-			// Upadate spheres
-			if (Spheres.size() > MAX_SPHERES) {
-				throw "yo.";
-			}
-
+			int NoOfRenderThreadSpheres = 0;
+			
 			std::vector<RenderSphere> Data;
-			for (int i = 0; i < Spheres.size(); i++) {
 
-				RenderSphere r;
-				r.PositionRadius= glm::vec4(Spheres[i].Position, Spheres[i].Radius), glm::vec4(1.);
-				r.Data = glm::vec4(Spheres[i].Color, Spheres[i].Life);
-				Data.push_back(r);
+			{
+				std::lock_guard<std::mutex> lock(DumpMutex);
+				glBindBuffer(GL_SHADER_STORAGE_BUFFER, HeightmapSSBO);
+				glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(float) * Resolution * Resolution, RenderThreadHeightmap, GL_DYNAMIC_DRAW);
+
+				// Upadate RenderThreadSpheres
+				if (RenderThreadSpheres.size() > MAX_SPHERES) {
+					throw "yo.";
+				}
+
+				for (int i = 0; i < RenderThreadSpheres.size(); i++) {
+
+					RenderSphere r;
+					r.PositionRadius = glm::vec4(RenderThreadSpheres[i].Position, RenderThreadSpheres[i].Radius), glm::vec4(1.);
+					r.Data = glm::vec4(RenderThreadSpheres[i].Color, RenderThreadSpheres[i].Life);
+					Data.push_back(r);
+				}
+
+				NoOfRenderThreadSpheres = RenderThreadSpheres.size();
 			}
 
 			// Upload data
 			glBindBuffer(GL_SHADER_STORAGE_BUFFER, SphereSSBO);
 			glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(RenderSphere) * Data.size(), Data.data(), GL_DYNAMIC_DRAW);
-			glBindBuffer(GL_SHADER_STORAGE_BUFFER, HeightmapSSBO);
-			glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(float) * Resolution * Resolution, Heightmap, GL_DYNAMIC_DRAW);
 
+			
 			// GBuffer
 			GBuffer[0].Bind();
 			glEnable(GL_DEPTH_TEST);
@@ -1066,6 +1234,8 @@ namespace Simulation {
 			BasicRender.SetInteger("u_Res", Resolution);
 			BasicRender.SetInteger("u_ResV", Resolution);
 			BasicRender.SetVector3f("u_SunDirection", SunDirection);
+			BasicRender.SetBool("u_HQ", HQFiltering);
+			BasicRender.SetBool("u_HQv", HQVertex);
 
 
 			glBindBufferBase(GL_SHADER_STORAGE_BUFFER, 0, HeightmapSSBO);
@@ -1090,7 +1260,7 @@ namespace Simulation {
 			RaytracingShader.SetInteger("u_Skybox", 2);
 			RaytracingShader.SetInteger("u_PoolTexture", 3);
 			
-			RaytracingShader.SetInteger("u_Spheres", Spheres.size());
+			RaytracingShader.SetInteger("u_Spheres", NoOfRenderThreadSpheres);
 			RaytracingShader.SetBool("u_RenderSpheres", RenderSpheres);
 			RaytracingShader.SetBool("u_RenderPool", RenderPool);
 
@@ -1164,6 +1334,8 @@ namespace Simulation {
 
 			PostShader.SetInteger("u_Texture", 0);
 			PostShader.SetFloat("u_Exposure", Exposure);
+			PostShader.SetFloat("u_Time", glfwGetTime());
+			PostShader.SetBool("u_Distort", FocusedUV.w > 0.5f);
 
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, GBuffer[1].GetTexture());
@@ -1179,7 +1351,30 @@ namespace Simulation {
 			DeltaTime = CurrentTime - Frametime;
 			Frametime = glfwGetTime();
 
-			GLClasses::DisplayFrameRate(app.GetWindow(), "Simulation ");
+			{
+				float PhysFPS = DoSim?(1. / glm::max(WorkerThreadDeltaTime,0.00001f)):60.001f;
+				std::stringstream s;
+				s << "Simulation | ";
+				if (mt)
+					s << "MULTITHREADED   |  ";
+				else
+					s << "SINGLETHREADED  |  ";
+
+				if (mt) {
+					std::stringstream ss;
+					ss << PhysFPS;
+					std::string temp = ss.str();
+					while (temp.size() <= 7) {
+						temp.push_back('0');
+					}
+					s << "Physics FPS [" << temp << " FPS]  |  Render FPS ";
+				}
+				GLClasses::DisplayFrameRate(app.GetWindow(), s.str());
+			}
 		}
+
+		WorkerThreadAlive = false;
+		PhysicsThread.join();
+		exit(0);
 	}
 }
